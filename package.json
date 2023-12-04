@@ -1,8 +1,8 @@
 {
   "name": "bxf",
-  "version": "1.0.0",
-  "description": "\"bxf\" is a versatile request library specifically designed for browsers, encapsulating both XHR and Fetch functionalities. In addition to handling regular network requests, it seamlessly supports network requests in the background with manifest_version 3.",
-  "main": "dist/index.js",
+  "version": "1.0.4",
+  "description": "bxf is a versatile request library specifically designed for browsers, encapsulating both XHR and Fetch functionalities. In addition to handling regular network requests, it seamlessly supports network requests in the background with manifest_version 3.",
+  "main": "dist/index.min.js",
   "files": [
     "dist/**/*",
     "README.md",
@@ -24,7 +24,7 @@
     "mv3",
     "crx"
   ],
-  "author": "slongzhang <slongZhang@126.com> (https://gitee.com/slongzhag)",
+  "author": "slongzhang <slongZhang@126.com> (https://gitee.com/slongzhag || https://github.com/slongzhang)",
   "license": "Apache-2.0",
   "bugs": {
     "url": "https://github.com/slongzhang/bxf/issues"
