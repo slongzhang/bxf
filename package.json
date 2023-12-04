@@ -1,0 +1,40 @@
+{
+  "name": "bxf",
+  "version": "1.0.5",
+  "description": "一个基于 promise 的网络请求库,支持XMLHttpRequest和fetch两种可选请求接口。除了常规的网页请求外，它还特别设计以与使用 manifest_version: 3 的浏览器扩展无缝集成。",
+  "main": "dist/index.min.js",
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "webpack --mode=development",
+    "build": "webpack --mode=production"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/slongzhang/bxf.git"
+  },
+  "keywords": [
+    "xhr",
+    "fetch",
+    "ajax",
+    "axios",
+    "http",
+    "mv3",
+    "crx",
+    "chrome",
+    "bxf"
+  ],
+  "author": "slongzhang <slongZhang@126.com> (https://gitee.com/slongzhag || https://github.com/slongzhang)",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/slongzhang/bxf/issues"
+  },
+  "homepage": "https://github.com/slongzhang/bxf#readme",
+  "devDependencies": {
+    "webpack": "^5.88.2",
+    "webpack-cli": "^5.1.4"
+  }
+}
