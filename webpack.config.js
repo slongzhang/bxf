@@ -23,7 +23,7 @@ module.exports = (env, config) => {
             clean: true, // 每次输出清除上次打包
             filename: 'index.js', // 输出的文件名
             path: path.resolve(__dirname, 'dist'), // 输出的绝对路径
-            library: 'httpRequest', // 类库的命名空间，如果通过网页的方式引入，则可以通过window.axios访问它
+            library: 'bxf', // 类库的命名空间，如果通过网页的方式引入，则可以通过window.axios访问它
             globalObject: 'this', // 定义全局变量,兼容node和浏览器运行，避免出现"window is not defined"的情况
             libraryTarget: "umd", // 定义打包方式Universal Module Definition,同时支持在CommonJS、AMD和全局变量使用
             libraryExport: 'default' // 对外暴露default属性，就可以直接调用default里的属性
@@ -72,7 +72,9 @@ module.exports = (env, config) => {
                 //   }
                 // },
             ]
-        }
+        },
+        // 生产环境不生产映射包
+        devtool: mode != 'development'? false: 'inline-cheap-source-map',
     }
     return result
 }
