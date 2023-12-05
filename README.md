@@ -126,7 +126,7 @@ bxf.options('/', {});
 
 ```js
 // 参照get
-HttpFetch.head('/', {});
+bxf.head('/', {});
 ```
 
 ### patch
