@@ -1,7 +1,7 @@
 // 浏览器 fetch 请求
 import { isJson, isNumeric, each, isEmpty, getType, blobToText, getCharset, getTimeout } from "../helpers/util"
 import { createError } from "../core/error";
-export const esFetch = (config) => {
+export const esFetch = async (config) => {
     // 最终请求配置参数
     const options = {}
         , defaultField = {
@@ -47,10 +47,16 @@ export const esFetch = (config) => {
     // 发送前回调通知
     if (getType(config.beforeSend) == 'function') {
         let beforeSendRes = config.beforeSend(config);
+        if (beforeSendRes instanceof Promise) {
+            try {
+                beforeSendRes = await beforeSendRes;
+            }catch(err) {}
+        }
         if (beforeSendRes === false) {
             return Promise.reject('被beforeSend拦截')
         }
     }
+    // 因为fetch上下文问题,所以需要通过bind保证fetch读取到正确的上下文环境
     return config.engine.bind(globalThis)(config.url, options).then(response => {
         clearTimeout(abortTimer) // 清除中断定时器
         const result = {

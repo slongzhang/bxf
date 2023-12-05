@@ -25,12 +25,11 @@ const defaultConfig = {
   requestType: 'query',
   responseType: null,
   charset: false, // 是否为content-type 加上编码，可选值{true: 'utf-8', false: '不添加', ...其他任意编码字符串}
-  engine: 'auto', // 引擎可选值['xhr', 'fetch', 以及自定义函数]不符合可选值如auto则进入自动判断选择
+  engine: null, // 引擎可选值['xhr', 'fetch', 以及自定义函数]不符合可选值如auto则进入自动判断选择
   beforeSend: null, // 发送前的函数回调，只有是函数才会调用其他参数会被忽略
   //contentType: undefined,
   // xhr或fetch的原生字段
   rawFields: {
-
   }
 };
 

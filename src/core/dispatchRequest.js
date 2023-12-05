@@ -75,7 +75,7 @@ const getEngine = (config) => {
   let engine = config.engine, engineType = getType(engine);
   
   // 如果没有传入请求引擎或请求引擎不是我们定义的则由我们自行判断调用默认引擎
-  if (engineType === 'undefined' || (engineType === 'function' && engine.name && !['XMLHttpRequest', 'fetch'].includes(engine.name))) {
+  if (engineType === 'undefined' || (engineType === 'function' && engine.name && !['XMLHttpRequest', 'bound XMLHttpRequest', 'fetch', 'bound fetch'].includes(engine.name))) {
     if (typeof XMLHttpRequest !== "undefined") {
       engine = 'xhr'
     }
@@ -109,7 +109,7 @@ export const dispatchRequest = (config) => {
   // config = processConfig(config);
 
   // 判断并调用请求引擎
-  if (getType(config.engine) == 'function' && config.engine.name === 'fetch') {
+  if (getType(config.engine) == 'function' && config.engine.name.includes('fetch')) {
     return esFetch(config) 
   }
   else {

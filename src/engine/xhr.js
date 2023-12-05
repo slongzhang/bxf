@@ -4,10 +4,15 @@ import { parseHeaders } from "../helpers/headers"
 import { createError } from "../core/error";
 
 export const xhr = (config) => {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
         // 发送前回调通知
         if (getType(config.beforeSend) == 'function') {
             let beforeSendRes = config.beforeSend(config);
+            if (beforeSendRes instanceof Promise) {
+                try {
+                    beforeSendRes = await beforeSendRes;
+                }catch(err) {}
+            }
             if (beforeSendRes === false) {
                 return reject('被beforeSend拦截')
             }
