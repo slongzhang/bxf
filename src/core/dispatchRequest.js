@@ -109,7 +109,7 @@ export const dispatchRequest = (config) => {
   // config = processConfig(config);
 
   // 判断并调用请求引擎
-  if (getType(config.engine) == 'function' && config.engine.name === 'fetch') {
+  if (getType(config.engine) == 'function' && config.engine.name.includes('fetch')) {
     return esFetch(config) 
   }
   else {

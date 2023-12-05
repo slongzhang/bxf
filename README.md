@@ -49,12 +49,12 @@ Use link:
 
 ```javascript
 const http = bxf.create({
-  baseUrl: 'https://www.bing.com', // 如果url是完整地址(http|https开头)的则会忽略baseUrl
+  baseUrl: 'https://www.xxx.com', // 如果url是完整地址(http|https开头)的则会忽略baseUrl
   method: 'post', // 默认请求 get
   requestType: 'query',// 默认query 可选参数有['query', 'json', 'form', 'formdata']
   responseType: null, // 默认null走text但如果返回的文本是json字符串会自动转成json对象，可选参数有 ['arrayBuffer', 'blob', 'blobText', 'formData', 'text', 'json'], 注意如果指定了text则不会自动判断转换json
   charset: false, // 是否为content-type 加上编码，可选值{true: 'utf-8', false: '不添加', ...其他任意编码字符串}
-  engine: 'auto', // 引擎可选值['xhr', 'fetch', 以及自定义函数]不符合可选值如auto则进入自动判断选择
+  engine: null, // 引擎可选值['xhr', 'fetch', 以及其他自定义的全局函数]不符合可选值则进入自动判断选择
   beforeSend: null, // 发送前的函数回调，只有是函数才会调用其他参数会被忽略，并且如果在beforeSend返回false则不会再进行请求了
   //contentType: undefined,
   // xhr: (request, config) => {}, // 只有engine是xhr请求才会在请求过程中调用该函数，可用于添加未定义到的xhr事件(如：获取上传进度)
@@ -334,5 +334,9 @@ bxf({
 })
 ```
 
+# 版本升级备注
+- 修复默认参数 responseType ,原本默认设置了text会导致无法自动判断json,需要自动判断json需要设置为非可选参数
+- 增加了 beforeSend 对于网页请求可能需求不大，添加这个主要是本人在开发浏览器扩展mv3时做动态请求头修改时需要获取最终请求的url，而补充的
+- 增加了打印配置的选项直接在bxf(requestConfig, true),则不会进行真实请求，只返回处理的配置
 
 # 懒得写文档，其他未列出的请前往github看源码。。。
