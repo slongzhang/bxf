@@ -56,9 +56,8 @@ export const esFetch = async (config) => {
             return Promise.reject('被beforeSend拦截')
         }
     }
-    // 解决在浏览器扩展报错的 Failed to execute 'fetch' on 'WorkerGlobalScope': Illegal invocation
-    config.engine = typeof document === 'undefined'? config.engine.bind(globalThis): config.engine;
-    return config.engine(config.url, options).then(response => {
+    // 因为fetch上下文问题,所以需要通过bind保证fetch读取到正确的上下文环境
+    return config.engine.bind(globalThis)(config.url, options).then(response => {
         clearTimeout(abortTimer) // 清除中断定时器
         const result = {
             data: null, // 响应内容
