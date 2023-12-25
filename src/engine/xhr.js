@@ -14,7 +14,7 @@ export const xhr = (config) => {
                 }catch(err) {}
             }
             if (beforeSendRes === false) {
-                return Promise.reject(
+                return reject(
                     createError(
                         `当前请求,被beforeSend拦截`,
                         config,
@@ -41,17 +41,17 @@ export const xhr = (config) => {
         // 是否有设置超时
         if (config.hasOwnProperty('timeout') && isNumeric(config.timeout) && config.timeout > 0) {
             request.timeout = getTimeout(config.timeout)
-            request.ontimeout = function (e) {
-                return Promise.reject(
-                    createError(
-                        'xhr 响应超时',
-                        config,
-                        null,
-                        request,
-                        e
-                    )
+        }
+        request.ontimeout = function (e) {
+            reject(
+                createError(
+                    'xhr 响应超时',
+                    config,
+                    null,
+                    request,
+                    e
                 )
-            }
+            )
         }
         // 判断用户是否设置了返回数据类型
         if (responseType && responseTypeArr.includes(responseType)) {
@@ -125,7 +125,7 @@ export const xhr = (config) => {
                     }
                     result.data = data
                     result.responseText = text;
-                    return responseFinalProcess()
+                    responseFinalProcess()
                 })
             }
             else {
