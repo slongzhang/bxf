@@ -53,7 +53,15 @@ export const esFetch = async (config) => {
             }catch(err) {}
         }
         if (beforeSendRes === false) {
-            return Promise.reject('被beforeSend拦截')
+            return Promise.reject(
+                createError(
+                    `当前请求,被beforeSend拦截`,
+                    config,
+                    null,
+                    null,
+                    null
+                )
+            )
         }
     }
     // 因为fetch上下文问题,所以需要通过bind保证fetch读取到正确的上下文环境
@@ -77,13 +85,13 @@ export const esFetch = async (config) => {
         const responseFinalProcess = () => {
             // 如果状态码在 200-300 之间正常 resolve，否则 reject 错误
             if (result.status >= 200 && result.status < 300) {
-                return result;
+                return config.toDataOnly? result.data :result
             } else {
                 return Promise.reject(
                     createError(
                         `Request failed with status code ${result.status}`,
                         config,
-                        null,
+                        result.status,
                         null,
                         result
                     )
@@ -124,7 +132,16 @@ export const esFetch = async (config) => {
         if (typeof err == 'object' && !isEmpty(err.name)) {
             if (err.name === 'AbortError') {
                 // 处理成abort报错模式
-                throw new DOMException(abortMsg, err.name);
+                return Promise.reject(
+                    createError(
+                        abortMsg,
+                        config,
+                        null,
+                        null,
+                        err
+                    )
+                )
+                // throw new DOMException(abortMsg, err.name);
             }
         }
         throw err;

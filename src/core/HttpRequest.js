@@ -1,6 +1,7 @@
 // 存放HttpRequest类
 import {dispatchRequest, processConfig} from "./dispatchRequest"
 import { isEmpty } from "../helpers/util"
+import { createError } from "../core/error"
 import InterceptorManager from "./InterceptorManager"
 class HttpRequest {
     // 用来存储配置信息
@@ -18,8 +19,15 @@ class HttpRequest {
     // 该类有一个request方法,它可以用来发送请求
     request(config, printConfig = false) {
         if (isEmpty(config)) {
-            let err = TypeError('配置参数错误或已被请求拦截,请检查代码')
-            return Promise.reject(err)
+            return Promise.reject(
+                createError(
+                    `配置参数错误或已被请求拦截,请检查代码`,
+                    config,
+                    null,
+                    null,
+                    null
+                )
+            )
         }
         // 处理传入的配置
         config = processConfig(config);

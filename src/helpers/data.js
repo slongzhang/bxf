@@ -182,7 +182,7 @@ export const transformRequestDataString = (data) => {
             result = data;
         }
         else {
-            each(dataTemp, (item, key) => {
+            each(dataTemp, (key, item) => {
                 result.push([key, item])
             })
         }

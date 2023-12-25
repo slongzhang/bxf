@@ -20,8 +20,8 @@ module.exports = (env, config) => {
     const result = {
         entry: './src/index.js',  // 打包入口文件
         output: {
-            clean: true, // 每次输出清除上次打包
-            filename: 'index.js', // 输出的文件名
+            clean: mode != 'development', // 每次输出清除上次打包
+            filename: `index${mode != 'development'? '.min': ''}.js`, // 输出的文件名
             path: path.resolve(__dirname, 'dist'), // 输出的绝对路径
             library: 'bxf', // 类库的命名空间，如果通过网页的方式引入，则可以通过window.axios访问它
             globalObject: 'this', // 定义全局变量,兼容node和浏览器运行，避免出现"window is not defined"的情况
@@ -40,11 +40,12 @@ module.exports = (env, config) => {
         },
         plugins: [
             new webpack.BannerPlugin({
-                banner: banner_format({
+                banner: mode != 'development' ?`/*! bxf | v${packageJson.version} | ${packageJson.license} Licensed */`: banner_format({
                     name: packageJson.name,
                     version: packageJson.version,
                     author: packageJson.author,
                     date: (new Date()).toLocaleString(),
+                    license: packageJson.license,
                     description: packageJson.description,
                 }),
                 raw: true,

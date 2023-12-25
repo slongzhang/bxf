@@ -14,7 +14,15 @@ export const xhr = (config) => {
                 }catch(err) {}
             }
             if (beforeSendRes === false) {
-                return reject('被beforeSend拦截')
+                return Promise.reject(
+                    createError(
+                        `当前请求,被beforeSend拦截`,
+                        config,
+                        null,
+                        null,
+                        null
+                    )
+                )
             }
         }
         // 解构config, data 如果不传默认认为null, method 不传默认 get, url则是必传参数
@@ -33,9 +41,16 @@ export const xhr = (config) => {
         // 是否有设置超时
         if (config.hasOwnProperty('timeout') && isNumeric(config.timeout) && config.timeout > 0) {
             request.timeout = getTimeout(config.timeout)
-            request.ontimeout = function () {
-                let err = TypeError('xhr 响应超时')
-                reject(err);
+            request.ontimeout = function (e) {
+                return Promise.reject(
+                    createError(
+                        'xhr 响应超时',
+                        config,
+                        null,
+                        request,
+                        e
+                    )
+                )
             }
         }
         // 判断用户是否设置了返回数据类型
@@ -81,13 +96,13 @@ export const xhr = (config) => {
             const responseFinalProcess = () => {
                 // 如果状态码在 200-300 之间正常 resolve，否则 reject 错误
                 if (result.status >= 200 && result.status < 300) {
-                    resolve(result);
+                    resolve(config.toDataOnly? result.data :result);
                 } else {
                     reject(
                         createError(
                             `Request failed with status code ${result.status}`,
                             config,
-                            null,
+                            result.status,
                             request,
                             result
                         )
@@ -119,21 +134,17 @@ export const xhr = (config) => {
         }
 
         // 监听错误
-        request.onerror = () => {
-            reject(createError(`Network Error`, config, null, request));
-        };
-        // 监听超时
-        request.ontimeout = () => {
-            // ECONNABORTED 通常表示一个被中止的请求
+        request.onerror = (err) => {
             reject(
                 createError(
-                    `Timeout of ${config.timeout} ms exceeded`,
+                    `Network Error`,
                     config,
-                    "ECONNABORTED",
-                    request
+                    null,
+                    request,
+                    err
                 )
             );
-        };
+        }
 
         // 遍历所有处理后的 headers
         each(headers, function (key, item) {
@@ -143,7 +154,7 @@ export const xhr = (config) => {
         // xhr字段设置
         if (config.hasOwnProperty('rawFields') && getType(config.rawFields) === 'object') {
             const banKeys = ['open', 'setRequestHeader', 'send']
-            each(config.xhrFields, function (key, item) {
+            each(config.rawFields, function (key, item) {
                 if (!banKeys.includes(key)) {
                     request[key] = item
                 }
@@ -162,7 +173,14 @@ export const xhr = (config) => {
             cancelToken.promise
                 .then((reason) => {
                     request.abort();
-                    reject(reason);
+                    reject(
+                        createError(
+                            reason.message,
+                            config,
+                            null,
+                            request
+                        )
+                    );
                 })
                 .catch(() => { });
         }
