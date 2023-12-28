@@ -29,7 +29,7 @@ export const xhr = (config) => {
         const { data = null, url, method = 'get', headers = {}, responseType, cancelToken } = config
 
         // responseType
-        const responseTypeArr = ['arrayBuffer', 'blob', 'blobText', 'formData'];
+        const responseTypeArr = ['json', 'text', 'arrayBuffer', 'blob', 'blobText'];
 
 
         // 实例化 XMLHttpRequest
@@ -70,7 +70,8 @@ export const xhr = (config) => {
 
             // 返回的 header 是字符串类型，通过 parseHeaders 解析成对象类型
             const responseHeaders = parseHeaders(request.getAllResponseHeaders());
-            const responseData = ((text) => {
+            const isResponseString = typeof request.response == 'string';
+            const responseData = isResponseString? ((text) => {
                     let data = text
                     if (isJson(text)) {
                         data = JSON.parse(text)
@@ -80,10 +81,10 @@ export const xhr = (config) => {
                         }
                     }
                     return data
-            })(request.responseText)
+            })(request.responseText): request.response;
             const result = {
                 data: responseData,
-                responseText: Object.getPrototypeOf(request).hasOwnProperty('responseText') ? request.responseText : null,
+                responseText: isResponseString? request.responseText : null,
                 status: request.status,
                 statusText: request.statusText,
                 headers: responseHeaders,

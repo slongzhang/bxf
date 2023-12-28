@@ -185,7 +185,7 @@ export function getCharset(config, responseHeaders) {
 
 // 获取超时
 export function getTimeout(timeout) {
-    timeout = timeout < 100 ? timeout * 1000 : timeout;
+    timeout = timeout < 301 ? timeout * 1000 : timeout;
     if (timeout < 1) {
         timeout = 1
     }

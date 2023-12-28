@@ -1,6 +1,6 @@
 {
   "name": "bxf",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "一个基于 promise 的网络请求库,支持XMLHttpRequest和fetch两种可选请求接口。除了常规的网页请求外，它还特别设计以与使用 manifest_version: 3 的浏览器扩展无缝集成。",
   "main": "dist/index.min.js",
   "files": [
