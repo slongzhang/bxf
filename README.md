@@ -52,12 +52,12 @@ const http = bxf.create({
   baseUrl: 'https://www.xxx.com', // 如果url是完整地址(http|https开头)的则会忽略baseUrl
   method: 'post', // 默认请求 get
   requestType: 'query',// 默认query 可选参数有['query', 'json', 'form', 'formdata']
-  responseType: null, // 默认null走text但如果返回的文本是json字符串会自动转成json对象，可选参数有 ['arrayBuffer', 'blob', 'blobText', 'formData', 'text', 'json'], 注意如果指定了text则不会自动判断转换json
+  // responseType: null, // 默认null走text但如果返回的文本是json字符串会自动转成json对象，可选参数有 ['arrayBuffer', 'blob', 'blobText', 'formData', 'text', 'json'], 注意如果指定了text则不会自动判断转换json
   charset: false, // 是否为content-type 加上编码，可选值{true: 'utf-8', false: '不添加', ...其他任意编码字符串}
-  engine: null, // 引擎可选值['xhr', 'fetch', 以及其他自定义的全局函数]不符合可选值则进入自动判断选择
-  beforeSend: null, // 发送前的函数回调，只有是函数才会调用其他参数会被忽略，并且如果在beforeSend返回false则不会再进行请求了
+  // engine: null, // 引擎可选值['xhr', 'fetch', 以及其他自定义的全局函数]不符合可选值则进入自动判断选择
+  // beforeSend: null, // 发送前的函数回调，只有是函数才会调用其他参数会被忽略，并且如果在beforeSend返回false则不会再进行请求了
   toDataOnly: false, // 是否只返回响应结果，忽略配置响应头等
-  //contentType: undefined,
+  // contentType: undefined,
   // xhr: (request, config) => {}, // 只有engine是xhr请求才会在请求过程中调用该函数，可用于添加未定义到的xhr事件(如：获取上传进度)
   // xhr或fetch的原生字段
   rawFields: {
@@ -344,7 +344,9 @@ bxf({
 ## v1.0.8
 - 增加toDataOnly 字段，可以仅返回响应数据
 
-## v1.0.9
+## v1.0.10
 - 修复xhr 响应类型非字符串，读取responseText错误问题
 - 超时timeout原本小于100的的会被处理为秒，修改为小于301就按秒处理（因为一般常见的可接受超时大于两分钟的还是比较常见）
+- 修复create对象配置未被合并处理
+
 # 其他未列出的请前往github看源码。。。

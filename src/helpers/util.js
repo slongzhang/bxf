@@ -206,3 +206,8 @@ export function extend(to, from, ctx) {
     }
     return to;
 }
+
+// 获取配置的响应类型
+export function getResponseTypes() {
+    return ['json', 'text', 'arrayBuffer', 'blob', 'blobText']
+}

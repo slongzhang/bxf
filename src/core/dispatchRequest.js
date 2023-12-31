@@ -43,7 +43,7 @@ export const processConfig = (config) => {
 
   // 处理请求体（必须位于处理url前，才能正确转换data和params混用）
   if (['GET', 'DELETE', 'HEAD'].includes(config.method)) {
-      if (!config.hasOwnProperty('params') && !isEmpty(config.data)) {
+      if ((!config.hasOwnProperty('params') || config.params == null || config.params == undefined) && !isEmpty(config.data)) {
           config.params = config.data
           config.data = null
       }
@@ -75,7 +75,7 @@ const getEngine = (config) => {
   let engine = config.engine, engineType = getType(engine);
   
   // 如果没有传入请求引擎或请求引擎不是我们定义的则由我们自行判断调用默认引擎
-  if (engineType === 'undefined' || (engineType === 'function' && engine.name && !['XMLHttpRequest', 'bound XMLHttpRequest', 'fetch', 'bound fetch'].includes(engine.name))) {
+  if (engineType === 'undefined' || isEmpty(engine) || (engineType === 'function' && engine.name && !['XMLHttpRequest', 'bound XMLHttpRequest', 'fetch', 'bound fetch'].includes(engine.name))) {
     if (typeof XMLHttpRequest !== "undefined") {
       engine = 'xhr'
     }

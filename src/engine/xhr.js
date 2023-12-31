@@ -70,8 +70,17 @@ export const xhr = (config) => {
 
             // 返回的 header 是字符串类型，通过 parseHeaders 解析成对象类型
             const responseHeaders = parseHeaders(request.getAllResponseHeaders());
-            const isResponseString = typeof request.response == 'string';
-            const responseData = isResponseString? ((text) => {
+            // ########
+            let responseText;
+            try {
+                if (request.responseText) {
+                    responseText = request.responseText
+                }
+            }
+            catch(e) {
+                responseText = null
+            }
+            const responseData = isEmpty(request.responseType)? ((text) => {
                     let data = text
                     if (isJson(text)) {
                         data = JSON.parse(text)
@@ -84,7 +93,7 @@ export const xhr = (config) => {
             })(request.responseText): request.response;
             const result = {
                 data: responseData,
-                responseText: isResponseString? request.responseText : null,
+                responseText: responseText,
                 status: request.status,
                 statusText: request.statusText,
                 headers: responseHeaders,

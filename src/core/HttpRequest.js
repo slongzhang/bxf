@@ -1,6 +1,6 @@
 // 存放HttpRequest类
 import {dispatchRequest, processConfig} from "./dispatchRequest"
-import { isEmpty } from "../helpers/util"
+import { isEmpty, merge } from "../helpers/util"
 import { createError } from "../core/error"
 import InterceptorManager from "./InterceptorManager"
 class HttpRequest {
@@ -30,7 +30,7 @@ class HttpRequest {
             )
         }
         // 处理传入的配置
-        config = processConfig(config);
+        config = processConfig(merge(this.config, config));
         if (printConfig) {
             return Promise.resolve(config)
         }
