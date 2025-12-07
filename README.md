@@ -1,6 +1,6 @@
 # 📦 bxf
 
-**bxf** 是一个基于 `Promise` 的轻量级网络请求库，兼容 **浏览器网页 / Node 环境 / 浏览器扩展（Manifest V3）**，支持：
+**bxf** 是一个基于 `Promise` 的轻量级网络请求库，兼容 **浏览器网页 / 浏览器扩展（Manifest V3）**，支持：
 
 * ✔ 自动选择 `fetch` 或 `XMLHttpRequest`
 * ✔ 可选使用浏览器原生 API（突破被网页环境 Hook 的风险）
@@ -82,8 +82,8 @@ api.get("user/info");
 | baseURL            | string       | 基础 URL                    |           |            |                |      |
 | params             | object       | URL 查询参数                  |           |            |                |      |
 | data               | any          | 请求体                       |           |            |                |      |
-| requestType        | `"json"      | "query"`                  | 自动编码 data |            |                |      |
-| responseType       | `"json"      | "text"                    | "blob"    | "blobtext" | "arraybuffer"` | 返回类型 |
+| requestType        | "json"      | "query"                  | 自动编码 data |            |                |      |
+| responseType       | "json"      | "text"                    | "blob"    | "blobtext" | "arraybuffer"` | 返回类型 |
 | headers            | object       | 自定义请求头                    |           |            |                |      |
 | timeout            | number       | 超时(ms)，基于 abortController |           |            |                |      |
 | beforeInterceptors | function     | 请求前钩子，可终止请求               |           |            |                |      |
