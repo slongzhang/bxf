@@ -343,6 +343,25 @@ bxf.get("/test", {
 });
 ```
 
+# fetch增加raw
+>响应类型默认会自动识别，自动解析获取到响应结果，但有时候开发者可能会需要自己获取句柄自行解析，可以通过responseType="raw"自行解析，等价于`fetch('https://xx.com', {})`
+```js
+bxf({
+  responseType: 'raw',
+}) => fetch(...)
+````
+
+# fetch增加stream流处理
+>为适应大模型的流消息，可直接通过responseType="stream"和onStream函数配置，实现流消息的处理
+```js
+bxf({
+  responseType: 'stream',
+  onStream: function(msg, rawMsg) {
+    // ...
+  }
+})
+```
+
 ---
 
 # 📦 并发工具

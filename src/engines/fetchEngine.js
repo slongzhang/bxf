@@ -85,16 +85,16 @@ export const fetchEngine = async function (config) {
                 // 逐条解析
                 for (const chunk of chunks) {
                     if (!chunk.trim()) continue;
+                    resDaw.push(chunk);
                     // 提取 data: 内容
                     const match = chunk.match(/^data:\s*(.*)$/m);
+                    let msg = '';
                     if (match?.[1]) {
-                        let msg = match[1];
-                        resDaw.push(msg);
-
+                        msg = match[1];
                         msg = isJson(msg)? JSON.parse(msg): msg;
                         resData.push(msg);
-                        config.onStream(msg); // 单条消息回调
                     }
+                    config.onStream(msg, chunk); // 单条消息回调
                 }
             }
 
