@@ -16,7 +16,15 @@ export function bxf(urlOrConfig, config, _method, data, _undefined) {
     const baseURL = this.baseURL;
 
     // 解析url请求地址
-    let url = (typeof urlOrConfig !== 'string'? (config = urlOrConfig).url : urlOrConfig);
+    let url;
+    if (typeof urlOrConfig !== 'string') {
+        config = urlOrConfig;
+        url = Object.hasOwn(config, 'initUrl')? config.initUrl: config.url;
+    }
+    else {
+        url = urlOrConfig;
+    }
+    const initUrl = url;
 
     // 合并请求参数
     const options = deepMerge(this.defaults, config);
@@ -129,6 +137,7 @@ export function bxf(urlOrConfig, config, _method, data, _undefined) {
 
     // 合并最终请求参数
     Object.assign(options, {
+        initUrl,
         url,
         method: method.toUpperCase(),
         data,

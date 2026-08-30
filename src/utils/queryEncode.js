@@ -93,7 +93,7 @@ export const queryEncode = function( a, traditional ) {
             }
         }
 	} 
-	else if (typeof a == 'string') {
+	else if (typeof a === 'string') {
 		s = [a]
 	}
 	else {
