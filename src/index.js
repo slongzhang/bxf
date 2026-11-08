@@ -1,4 +1,4 @@
-import { createClient } from "./core/createClient";
+import { createClient } from "./core/createClient.js";
 
 
 export default createClient();

@@ -1,7 +1,7 @@
 /**
  * 提取自jQuery3.6里的函数
  */
-import { getType } from './index'
+import { getType } from './index.js'
 
 const 
 	rbracket = /\[\]$/,
@@ -56,6 +56,14 @@ function buildParams( prefix, obj, traditional, add ) {
 export const queryEncode = function( a, traditional ) {
 	let prefix,
 		s = [];
+
+	// URLSearchParams 是 WHATWG 标准入参（axios / fetch 用户常用）。
+	// 不能走下面的 for...in：它会遍历到原型上的 append/get/set 等方法，
+	// 取出来当普通函数调用时 this 丢失，抛 ERR_INVALID_THIS。
+	if ( typeof URLSearchParams !== 'undefined' && a instanceof URLSearchParams ) {
+		return a.toString();
+	}
+
 	const add = function( key, valueOrFunction ) {
 			// 如果value是一个函数，则调用它并使用其返回值
 			var value = typeof valueOrFunction == 'function' ?
@@ -73,14 +81,21 @@ export const queryEncode = function( a, traditional ) {
 	// 如果传入了一个数组，则假设它是一个表单元素数组(jQuery('form').serializeArray)。
 	if ( Array.isArray( a ) ) {
 
-        // 判断是jQuery的表单数组还是其他
-        if (a.every(item => Object.hasOwn(item, 'name') && Object.hasOwn(item, 'value'))) {
-            // 序列化表单元素
-            for (let [name, value] of a) {
-                add(name, value)
-            }
-        }
-        else {
+		// 判断是 jQuery 表单数组 [{name,value}] 还是其它数组。
+		// 两个历史坑：① Object.hasOwn(null, ...) 会抛 TypeError，必须逐项判空；
+		// ② 表单项是普通对象，不能用 for (let [name,value] of a) 数组解构（会抛
+		//    ".for is not iterable"）。正确写法是遍历项再读 .name / .value。
+		const isFormArray = a.length > 0 && a.every( item =>
+			item !== null && typeof item === 'object' &&
+			Object.hasOwn( item, 'name' ) && Object.hasOwn( item, 'value' )
+		);
+		if ( isFormArray ) {
+			// 序列化表单元素
+			for ( const item of a ) {
+				add( item.name, item.value );
+			}
+		}
+		else {
             // 其他类型的数组
             for (let item of a) {
                 let itemType = getType(item);

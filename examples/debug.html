@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>bxf 通用调试台 · 案例库</title>
+<style>
+  :root { --bg:#f6f8fa; --card:#fff; --ink:#1f2328; --muted:#656d76; --line:#d0d7de;
+          --code:#0d1117; --ok:#1a7f37; --no:#cf222e; --accent:#0969da; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif; }
+  header { padding:24px 20px 16px; border-bottom:1px solid var(--line); background:var(--card); }
+  header h1 { margin:0 0 6px; font-size:20px; }
+  header p { margin:4px 0; color:var(--muted); }
+  .wrap { max-width:960px; margin:0 auto; padding:20px; }
+  .banner { background:#eaf4ff; border:1px solid #b6dbff; color:#0a3069;
+            padding:10px 12px; border-radius:8px; margin:14px 0; font-size:13px; }
+  .status { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; margin-top:6px; }
+  .ok { color:var(--ok); } .no { color:var(--no); }
+  .case { background:var(--card); border:1px solid var(--line); border-radius:10px;
+          margin:16px 0; overflow:hidden; }
+  .case h3 { margin:0; padding:12px 14px; font-size:15px; border-bottom:1px solid var(--line);
+             display:flex; align-items:center; gap:8px; }
+  .case .tag { font-size:11px; font-weight:600; color:#fff; background:var(--accent);
+               padding:1px 7px; border-radius:20px; }
+  .case .note { padding:8px 14px; color:var(--muted); font-size:13px; border-bottom:1px solid var(--line); }
+  .case pre { margin:0; background:var(--code); color:#e6edf3; padding:14px;
+              overflow:auto; font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  .case .bar { display:flex; gap:8px; padding:8px 14px; border-top:1px solid var(--line); background:#fbfcfd; }
+  button { font:13px/1 inherit; border:1px solid var(--line); background:#fff; color:var(--ink);
+           padding:6px 12px; border-radius:6px; cursor:pointer; }
+  button:hover { border-color:var(--accent); color:var(--accent); }
+  .out { padding:8px 14px; font:12px/1.5 ui-monospace,monospace; white-space:pre-wrap;
+         color:var(--muted); border-top:1px dashed var(--line); display:none; }
+  footer { color:var(--muted); font-size:12px; padding:20px; text-align:center; }
+  code.inline { background:#eaeef2; padding:1px 5px; border-radius:4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>bxf 通用调试台 · 案例库</h1>
+  <p>服务端只有一个可配置的通用接口 <code class="inline">/mock</code>：可指定 method / 响应类型 / 状态码 / 延迟，支持普通请求、文件上传、消息流。</p>
+  <p>打开浏览器开发者面板（F12 → Console），点「复制」把下面任意案例贴进控制台回车即可运行；运行后输入
+     <code class="inline">res</code> / <code class="inline">err</code> 即可查看完整成功 / 失败响应。</p>
+  <div class="banner">
+    ⚠️ 本页必须通过调试服务打开（<code class="inline">http://127.0.0.1:7799/</code>），不要直接 <code class="inline">file://</code> 打开，否则 <code class="inline">bxf.js</code> 与全局函数无法加载。
+    <div class="status" id="status">正在检测全局函数…</div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- ============ 案例源码（text/plain，不会被当作脚本执行，复制即用） ============ -->
+
+  <script type="text/plain" data-title="普通 GET（服务端回显请求）" data-tag="基础"
+    data-note="服务端默认以 json 回显你发出的请求（method / query / headers / body）。">
+var res = null, err = null;
+bxf({ url: API + '/mock?rt=json', method: 'GET' })
+  .then(r => { res = r; console.log('✅', r.status, r.data); })
+  .catch(e => { err = e; console.warn('❌', e); });
+// 控制台输入 res.data.request 查看完整请求回显
+  </script>
+
+  <script type="text/plain" data-title="POST 发送 JSON" data-tag="基础"
+    data-note="bxf 会自动把对象 data JSON.stringify 并设置 content-type: application/json。">
+var res = null, err = null;
+bxf({ url: API + '/mock', method: 'POST', data: { name: 'bxf', age: 1 } })
+  .then(r => { res = r; console.log('✅ 服务端收到的 JSON:', r.data.request.bodyJson); })
+  .catch(e => { err = e; console.warn('❌', e); });
+  </script>
+
+  <script type="text/plain" data-title="POST 发送 urlencode（表单字符串）" data-tag="表单"
+    data-note="用 requestType:'query' 让 bxf 把对象编码为 application/x-www-form-urlencoded。">
+var res = null, err = null;
+bxf({ url: API + '/mock', method: 'POST', data: { a: 1, b: '你好' }, requestType: 'query' })
+  .then(r => { res = r; console.log('✅ 服务端解析到的字段:', r.data.request.fields); })
+  .catch(e => { err = e; console.warn('❌', e); });
+  </script>
+
+  <script type="text/plain" data-title="POST 发送 FormData（文本字段）" data-tag="表单"
+    data-note="FormData 会被原样透传给引擎，适合混合文本与文件。">
+var fd = new FormData();
+fd.append('user', 'bxf');
+fd.append('role', 'crc');
+var res = null, err = null;
+bxf({ url: API + '/mock', method: 'POST', data: fd })
+  .then(r => { res = r; console.log('✅ 文本字段:', r.data.request.fields); })
+  .catch(e => { err = e; console.warn('❌', e); });
+  </script>
+
+  <script type="text/plain" data-title="文件上传（genFile 生成 Blob → append）" data-tag="文件"
+    data-note="全局函数 genFile(type, size) 按类型与字节数生成 Blob，直接 append 进 FormData 即可测试上传；服务端回显文件名/类型/大小。">
+var fd = new FormData();
+fd.append('name', 'bxf');
+// genFile(文件类型, 字节数) -> Blob；文件名由 append 的第三个参数指定
+fd.append('file', genFile('image/png', 2048), 'mock.png');
+fd.append('doc',  genFile('text/plain', 1024), 'note.txt');
+var res = null, err = null;
+bxf({ url: API + '/mock?rt=json', method: 'POST', data: fd })
+  .then(r => { res = r; console.log('✅ 已上传文件:', r.data.request.files); })
+  .catch(e => { err = e; console.warn('❌', e); });
+// r.data.request.files = [{ field, filename, type, size }, ...]
+  </script>
+
+  <script type="text/plain" data-title="DELETE 带请求体" data-tag="基础"
+    data-note="bxf 不会把 DELETE 的 body 降级成 query，物理 DELETE 体正常发送。">
+var res = null, err = null;
+bxf({ url: API + '/mock', method: 'DELETE', data: { id: 123 } })
+  .then(r => { res = r; console.log('✅ DELETE 请求体:', r.data.request.bodyJson); })
+  .catch(e => { err = e; console.warn('❌', e); });
+  </script>
+
+  <script type="text/plain" data-title="指定响应类型：服务端返回 urlencode" data-tag="响应类型"
+    data-note="bxf 内置响应类型没有 urlencode（仅 auto/text/json/blob/arraybuffer/document/raw/stream），故用 text 接收后再用 URLSearchParams 解析。">
+var res = null, err = null;
+bxf({ url: API + '/mock?rt=urlencode&status=200', method: 'GET', responseType: 'text' })
+  .then(r => {
+    res = r;
+    var obj = Object.fromEntries(new URLSearchParams(r.data));
+    console.log('✅ 文本:', r.data, '→ 解析为对象:', obj);
+  })
+  .catch(e => { err = e; console.warn('❌', e); });
+  </script>
+
+  <script type="text/plain" data-title="指定响应类型：服务端返回纯文本" data-tag="响应类型"
+    data-note="responseType:'text' 拿到解码后的字符串。">
+var res = null, err = null;
+bxf({ url: API + '/mock?rt=text', method: 'GET', responseType: 'text' })
+  .then(r => { res = r; console.log('✅ 文本响应:', r.data); })
+  .catch(e => { err = e; console.warn('❌', e); });
+  </script>
+
+  <script type="text/plain" data-title="指定状态码：401 看失败响应" data-tag="响应类型"
+    data-note="非 2xx 且未通过 resolveStatus 时 reject；err.response 是完整 BxfResponse，err.config 可重放。">
+var res = null, err = null;
+bxf({ url: API + '/mock?status=401', method: 'GET', responseType: 'json' })
+  .then(r => { res = r; console.log('✅', r.status); })
+  .catch(e => { err = e; console.warn('❌ 失败响应:', e.response && e.response.data, '| code:', e.code); });
+// 控制台输入 err.response 看完整失败包；err.config 可 bxf(err.config) 重放
+  </script>
+
+  <script type="text/plain" data-title="超时测试（delay 超过 timeout）" data-tag="中断"
+    data-note="服务端 ?delay=2000，客户端 timeout:500，应得到 ETIMEDOUT。">
+var res = null, err = null;
+bxf({ url: API + '/mock?delay=2000', method: 'GET', timeout: 500, responseType: 'json' })
+  .then(r => { res = r; })
+  .catch(e => { err = e; console.warn('❌ 超时错误码:', e.code, e.message); });
+  </script>
+
+  <script type="text/plain" data-title="取消请求（AbortController）" data-tag="中断"
+    data-note="signal 传入 AbortController，调用 abort() 触发 ERR_CANCELED。">
+var ac = new AbortController();
+var res = null, err = null;
+bxf({ url: API + '/mock?delay=3000', method: 'GET', signal: ac.signal, responseType: 'json' })
+  .then(r => { res = r; })
+  .catch(e => { err = e; console.warn('❌ 取消错误码:', e.code); }); // ERR_CANCELED
+setTimeout(() => ac.abort(), 300);
+  </script>
+
+  <script type="text/plain" data-title="消息流 SSE（逐帧回调）" data-tag="流"
+    data-note="?stream=1&n=3&ms=50 让服务端逐帧推送；onStream(frame) 收到原始帧文本。">
+var frames = [];
+var res = null, err = null;
+bxf({ url: API + '/mock?stream=1&n=3&ms=50', method: 'GET', responseType: 'stream',
+  onStream: (frame) => { frames.push(frame); console.log('📨 帧:', frame); } })
+  .then(r => { res = r; console.log('✅ 流结束，共', frames.length, '帧'); })
+  .catch(e => { err = e; console.warn('❌', e); });
+  </script>
+
+  <script type="text/plain" data-title="拦截器（请求加头 / 响应捕获）" data-tag="进阶"
+    data-note="bxf.create() 得到独立实例，interceptors.request/response 可链式注入。">
+var api = bxf.create();                       // 独立实例，不共享 defaults
+api.interceptors.request.use(c => {
+  c.headers = c.headers || {};
+  c.headers['x-token'] = 'abc';
+  return c;
+});
+api.interceptors.response.use(
+  r => r,
+  e => { console.warn('响应拦截器捕获:', e.code); return Promise.reject(e); }
+);
+var res = null, err = null;
+api({ url: API + '/mock', method: 'GET', responseType: 'json' })
+  .then(r => { res = r; console.log('✅ 请求头已被拦截器加 x-token:', r.data.request.headers['x-token']); })
+  .catch(e => { err = e; console.warn('❌', e); });
+  </script>
+
+  <script type="text/plain" data-title="GBK 字节 + 错误 utf-8 头（charset 覆盖）" data-tag="字符集"
+    data-note="服务端响应头错标 utf-8、字节却是 GBK；指定 charset:'gbk' 即可正确解码。去掉该参数会得到乱码。">
+var res = null, err = null;
+bxf({ url: API + '/mock?charset=gbk&wrongct=1', method: 'GET', responseType: 'text', charset: 'gbk' })
+  .then(r => { res = r; console.log('✅ GBK 正确解码:', r.data); }) // “GBK中文测试：你好，世界”
+  .catch(e => { err = e; console.warn('❌', e); });
+  </script>
+
+  <script type="text/plain" data-title="便捷写法：实例别名 + run 包装" data-tag="进阶"
+    data-note="实例自带 .get/.post 别名；全局 run(cfg) 返回 Promise，并在其上挂 res()/err()，请求完成后可取出完整响应/错误。">
+var res = null, err = null;
+bxf.get(API + '/mock?rt=json')
+  .then(r => { res = r; console.log('✅', r.status); })
+  .catch(e => { err = e; console.warn('❌', e); });
+
+// 也可以用全局 run：结果函数挂在「返回的 Promise」上，需要调用
+var job = run({ url: API + '/mock?status=201', method: 'GET', responseType: 'json' });
+setTimeout(() => {
+  var r = job.res(), e = job.err();
+  console.log('run 结果:', r && r.status, e && e.code);
+}, 200);
+  </script>
+
+</div>
+
+<footer>
+  全局函数：<code class="inline">bxf</code>（请求库） · <code class="inline">API</code>（= location.origin） · <code class="inline">genFile(type,size)</code> · <code class="inline">api(path,opts)</code> · <code class="inline">run(cfg)</code>
+</footer>
+
+<!-- 加载库与全局函数 -->
+<script src="/bxf.js"></script>
+<script>
+  // 全局基础函数（案例里直接引用）
+  window.API = location.origin;
+  window.genFile = function (type, size) {
+    type = type || 'application/octet-stream';
+    size = size || 1024;
+    var bytes = new Uint8Array(size);
+    for (var i = 0; i < size; i++) bytes[i] = (i * 37 + 11) & 0xff;
+    return new Blob([bytes], { type: type });
+  };
+  window.api = function (path, opts) {
+    opts = opts || {};
+    return bxf(Object.assign({ url: location.origin + path }, opts));
+  };
+  // run：用经典的 res/err 模式，并把结果挂到返回值上方便查看
+  window.run = function (cfg) {
+    var res = null, err = null;
+    var p = bxf(cfg)
+      .then(function (r) { res = r; console.log('%c✅ 成功', 'color:#1a7f37', r && r.status, r && r.data); })
+      .catch(function (e) { err = e; console.warn('%c❌ 失败', 'color:#cf222e', e); });
+    p.res = function () { return res; };
+    p.err = function () { return err; };
+    return p;
+  };
+
+  // 自检：确认 bxf / genFile 已挂载
+  (function () {
+    var el = document.getElementById('status');
+    var okBxf = typeof bxf === 'function';
+    var okGen = typeof genFile === 'function';
+    el.innerHTML = (okBxf ? '<span class="ok">✓ bxf 已加载</span>' : '<span class="no">✗ bxf 未加载</span>')
+      + ' · ' + (okGen ? '<span class="ok">✓ genFile 已加载</span>' : '<span class="no">✗ genFile 未加载</span>')
+      + ' · API = ' + location.origin;
+  })();
+
+  // 渲染案例卡片
+  (function () {
+    var srcs = document.querySelectorAll('script[type="text/plain"]');
+    var wrap = document.querySelector('.wrap');
+    srcs.forEach(function (s) {
+      var code = s.textContent.replace(/^\n/, '').replace(/\n\s*$/, '');
+      var card = document.createElement('section');
+      card.className = 'case';
+      var title = s.dataset.title || '案例';
+      var tag = s.dataset.tag || '';
+      var note = s.dataset.note || '';
+      card.innerHTML =
+        '<h3>' + (tag ? '<span class="tag">' + tag + '</span>' : '') + title + '</h3>' +
+        (note ? '<div class="note">' + note + '</div>' : '') +
+        '<pre><code></code></pre>' +
+        '<div class="bar">' +
+          '<button class="copy">复制</button>' +
+          '<button class="run">运行</button>' +
+        '</div>' +
+        '<div class="out"></div>';
+      card.querySelector('code').textContent = code;
+
+      var out = card.querySelector('.out');
+      card.querySelector('.copy').addEventListener('click', function () {
+        navigator.clipboard.writeText(code).then(function () {
+          var b = card.querySelector('.copy'); b.textContent = '已复制 ✓';
+          setTimeout(function () { b.textContent = '复制'; }, 1200);
+        });
+      });
+      card.querySelector('.run').addEventListener('click', function () {
+        out.style.display = 'block';
+        out.textContent = '运行中…（也可直接复制到控制台）';
+        try {
+          (0, eval)(code); // 间接 eval：var res/err 进入全局，便于下方读取
+        } catch (e) {
+          out.textContent = '运行异常：' + (e && e.stack || e);
+          return;
+        }
+        var t0 = Date.now();
+        var timer = setInterval(function () {
+          if (window.res !== undefined || window.err !== undefined || Date.now() - t0 > 4000) {
+            clearInterval(timer);
+            var lines = [];
+            if (window.res !== undefined) {
+              try { lines.push('res: ' + JSON.stringify(window.res, null, 2)); }
+              catch (e) { lines.push('res: ' + String(window.res)); }
+            }
+            if (window.err !== undefined) {
+              lines.push('err: ' + (window.err && window.err.message || window.err));
+            }
+            out.textContent = lines.join('\n') || '（无 res/err，见控制台日志）';
+          }
+        }, 150);
+      });
+      wrap.appendChild(card);
+      s.remove();
+    });
+  })();
+</script>
+</body>
+</html>

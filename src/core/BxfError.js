@@ -1,34 +1,43 @@
 'use strict';
 
-
+/**
+ * 双引擎共用的错误类型。
+ * 无论请求走 fetch 还是 XHR，失败时对外一定是 BxfError，
+ * 且 code / config / response 字段形状一致。
+ * config 由调用方保证传入可回喂的快照（spec.source），错误对象不再做隐式剥离。
+ */
 class BxfError extends Error {
-    static from(error, code, config, request, response, customProps) {
-        const bxfError = new BxfError(error.message, code || error.code, config, request, response);
+    static from(error, code, config, response, customProps) {
+        // error 可能是 Error、DOMException、XHR 实例（无 message）、字符串或 undefined
+        let message;
+        if (typeof error === 'string') {
+            message = error;
+        } else if (error && typeof error === 'object') {
+            message = error.message || error.statusText ||
+                (error.name ? String(error.name) : 'Unknown error');
+        } else {
+            message = 'Unknown error';
+        }
+
+        const bxfError = new BxfError(
+            message,
+            code || (error && error.code),
+            config,
+            response,
+        );
         bxfError.cause = error;
-        bxfError.name = error.name;
+        // 底层原始错误名保留在 causeName，对外 name 恒为 BxfError（双引擎一致）
+        if (error && error.name) bxfError.causeName = error.name;
         customProps && Object.assign(bxfError, customProps);
         return bxfError;
     }
 
-    /**
-     * Create an Error with the specified message, config, error code, request and response.
-     *
-     * @param {string} message The error message.
-     * @param {string} [code] The error code (for example, 'ECONNABORTED').
-     * @param {Object} [config] The config.
-     * @param {Object} [request] The request.
-     * @param {Object} [response] The response.
-     *
-     * @returns {Error} The created error.
-     */
-    constructor(message, code, config, request, response) {
+    constructor(message, code, config, response) {
         super(message);
         this.name = 'BxfError';
         this.isBxfError = true;
-        this.code = code? code : 'ERR_UNKNOWN';
-        // code && (this.code = code);
-        config && (this.config = config);
-        request && (this.request = request);
+        this.code = code ? code : 'ERR_UNKNOWN';
+        if (config) this.config = config;
         if (response) {
             this.response = response;
             this.status = response.status;
@@ -37,18 +46,14 @@ class BxfError extends Error {
 
     toJSON() {
         return {
-            // Standard
             message: this.message,
             name: this.name,
-            // Microsoft
             description: this.description,
             number: this.number,
-            // Mozilla
             fileName: this.fileName,
             lineNumber: this.lineNumber,
             columnNumber: this.columnNumber,
             stack: this.stack,
-            // Axios
             config: this.config,
             code: this.code,
             status: this.status,
@@ -57,53 +62,62 @@ class BxfError extends Error {
     }
 }
 
-// 错误的配置项值(如timeout字段值只能是正整型，而用户配置了负数或浮点数)
+// 错误的配置项值(如timeout字段值只能是正整型)
 BxfError.ERR_BAD_OPTION_VALUE = 'ERR_BAD_OPTION_VALUE';
-// 无效的配置项(如timeou字段用户写成TimeOut等字段拼写错误)
+// 无效的配置项(如 timeout 字段拼写错误)
 BxfError.ERR_BAD_OPTION = 'ERR_BAD_OPTION';
-// 请求被中止（请求因超时 / 手动取消被中断）
-BxfError.ECONNABORTED = 'ECONNABORTED';
-// 请求超时(分为两种超时：1. 连接超时：无法在指定时间内与服务器建立 TCP 连接（如服务器宕机、网络不通）；2. 响应超时：连接建立后，服务器未在指定时间返回响应。)
+// 请求超时（连接或响应超时，由 AbortSignal.timeout 触发）
 BxfError.ETIMEDOUT = 'ETIMEDOUT';
-// 网络错误(底层网络层异常，请求无法发送 / 接收。例：前端断网（WiFi/4G 断开）、跨域未配置、防火墙拦截、DNS 解析失败、服务器端口未开放。)
-BxfError.ERR_NETWORK = 'ERR_NETWORK';
-// // 重定向次数过多(请求触发的 HTTP 重定向（3xx 状态码）超过 Axios 配置的 maxRedirects 上限（默认 21 次）。例：A→B→C→… 循环重定向、重定向链过长。)
-// BxfError.ERR_FR_TOO_MANY_REDIRECTS = 'ERR_FR_TOO_MANY_REDIRECTS';
-// // 已废弃的 API / 配置
-// BxfError.ERR_DEPRECATED = 'ERR_DEPRECATED';
-// 无效的响应(服务器返回了 非标准 HTTP 响应（无法解析）)
-BxfError.ERR_BAD_RESPONSE = 'ERR_BAD_RESPONSE';
-// 错误的请求(请求本身格式非法，服务器无法处理（区别于 400 状态码，是客户端 / 网络层的请求构建错误）。例：请求头格式错误、请求体编码异常、URL 包含非法字符（未编码）)
-BxfError.ERR_BAD_REQUEST = 'ERR_BAD_REQUEST';
-// 请求被取消(用户通过传入的signal 进行abort取消)
+// 请求被用户主动取消
 BxfError.ERR_CANCELED = 'ERR_CANCELED';
+// 兼容旧版：被中止的统称（现在优先使用上面两个更精确的 code）
+BxfError.ECONNABORTED = 'ECONNABORTED';
+// 网络错误(断网、跨域未配置、DNS 失败等)
+BxfError.ERR_NETWORK = 'ERR_NETWORK';
+// 无效的响应(响应体无法按预期解析)
+BxfError.ERR_BAD_RESPONSE = 'ERR_BAD_RESPONSE';
+// 错误的请求(请求构建/发送阶段异常)
+BxfError.ERR_BAD_REQUEST = 'ERR_BAD_REQUEST';
 // 无效的 URL
 BxfError.ERR_INVALID_URL = 'ERR_INVALID_URL';
-// onlyDate 拒绝
-BxfError.ERR_ONLYDATA_STATUS = 'ERR_ONLYDATA_STATUS';
-// 用户在beforeInterceptors 返回false终止后续操作
+// 当前引擎不支持该能力
+BxfError.ERR_UNSUPPORTED = 'ERR_UNSUPPORTED';
+// HTTP 状态码未命中 resolveStatus 规则
+BxfError.ERR_HTTP_STATUS = 'ERR_HTTP_STATUS';
+// 用户在 beforeInterceptors 返回 false 终止后续操作
 BxfError.BEFORE_TERMINATE = 'BEFORE_TERMINATE';
 // abortSignal 信号终止
 BxfError.ERR_ABORT_SIGNAL = 'ERR_ABORT_SIGNAL';
 
-/*
-if (false) {
-    // 使用案例
-    const asDemo = function () {
-        const config = {}, // 请求配置
-            request = {}, // xhr的请求句柄
-            response = {}; // 响应结果{data, raw, status, statusText, headers}
-        // 1.手动抛出错误
-        const myErr = new BxfError('手动抛出错误', 'ERR_TEST', config, request, response);
-        // 系统等其他catch捕获到的error
-        try {
-            const a = 1;
-            a = 2;
-        } catch (error) {
-            const unErr = BxfError.from(error, void 0, config, request, response);
-        }
+/**
+ * 把底层抛出的任意错误映射成统一的 BxfError code。
+ * fetch 原生可能抛 AbortError / TimeoutError / TypeError('Failed to fetch')，
+ * XHR 抛的是事件对象，这里做唯一收口。
+ */
+BxfError.resolveCode = function (error, signal) {
+    if (error && error.isBxfError && error.code && error.code !== 'ERR_UNKNOWN') {
+        return error.code;
     }
-}
-*/
+    if (error && error.code && typeof error.code === 'string' && error.code !== 'ERR_UNKNOWN') {
+        return error.code;
+    }
+    const reason = (signal && signal.reason) || undefined;
+    const name = (error && error.name) || (reason && reason.name) || '';
+    const message = (error && error.message) || '';
+
+    if (name === 'TimeoutError' || /timed out|timeout/i.test(message)) {
+        return BxfError.ETIMEDOUT;
+    }
+    if (name === 'AbortError' || (signal && signal.aborted)) {
+        return BxfError.ERR_CANCELED;
+    }
+    if (name === 'TypeError' || /failed to fetch|networkerror|load failed/i.test(message)) {
+        return BxfError.ERR_NETWORK;
+    }
+    if (name === 'SyntaxError') {
+        return BxfError.ERR_BAD_RESPONSE;
+    }
+    return 'ERR_UNKNOWN';
+};
 
 export default BxfError;

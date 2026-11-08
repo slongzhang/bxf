@@ -1,4 +1,4 @@
-import { isObject } from '../utils/index';
+import { isObject } from '../utils/index.js';
 /**
  * 构建 axios 风格拦截器链
  * request: 后添加先执行（栈）
@@ -24,8 +24,11 @@ export function dispatchWithInterceptors(config, requestFn, interceptors) {
     );
 
     // 3) response 拦截器（顺序执行）
+    // eject(id) 用「置 null」保留下标而不 splice，所以链里可能残留 null。
+    // 这里必须和 request 侧一样跳过，否则 eject 之后任何请求都会抛
+    // "Cannot read properties of null (reading 'fulfilled')"。
     interceptors.response.handlers.forEach((h) => {
-        chain.push(h.fulfilled, h.rejected);
+        if (h && isObject(h)) chain.push(h.fulfilled, h.rejected);
     });
 
     // 逐个链接

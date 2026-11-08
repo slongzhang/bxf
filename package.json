@@ -1,6 +1,6 @@
 {
     "name": "bxf",
-    "version": "1.1.4",
+    "version": "1.2.0",
     "description": "一个基于 promise 的网络请求库,支持XMLHttpRequest和fetch两种可选请求接口。除了常规的网页请求外，它还特别设计以与使用 manifest_version: 3 的浏览器扩展无缝集成。",
     "main": "dist/bxf.umd.min.js",
     "files": [
@@ -11,7 +11,11 @@
     ],
     "scripts": {
         "dev": "vite build --mode development",
-        "build": "vite build --mode development && vite build"
+        "build": "vite build --mode development && vite build",
+        "test": "node --experimental-default-type=module test/consistency.test.mjs && node --experimental-default-type=module test/retry-stream.test.mjs && node --experimental-default-type=module test/boundary.test.mjs && node --experimental-default-type=module test/stress.test.mjs && node --expose-gc --experimental-default-type=module test/large-body.test.mjs",
+        "playground": "node examples/playground/server.mjs",
+        "readme": "node examples/playground/gen-readme.mjs",
+        "verify": "node examples/playground/verify-cases.mjs"
     },
     "repository": {
         "type": "git",
