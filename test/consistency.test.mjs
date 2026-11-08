@@ -247,8 +247,12 @@ function assertSameShape(fetchRes, xhrRes, label) {
     );
     assert.equal(fetchRes.status, xhrRes.status, `${label}: status 不一致`);
     assert.equal(fetchRes.statusText, xhrRes.statusText, `${label}: statusText 不一致`);
-    // 对外契约固定 5 字段；原生句柄只在 responseType:'raw' 的 data 上提供
-    const RESPONSE_FIELDS = ['data', 'status', 'statusText', 'headers', 'config'];
+    assert.equal(fetchRes.responseURL, xhrRes.responseURL, `${label}: responseURL 不一致`);
+    assert.equal(fetchRes.redirected, xhrRes.redirected, `${label}: redirected 不一致`);
+    // 对外契约固定 7 字段；原生句柄只在 responseType:'raw' 的 data 上提供
+    const RESPONSE_FIELDS = [
+        'data', 'status', 'statusText', 'headers', 'config', 'responseURL', 'redirected',
+    ];
     assert.deepEqual(Object.keys(fetchRes), RESPONSE_FIELDS, `${label}: fetch 响应字段集合不符`);
     assert.deepEqual(Object.keys(xhrRes), RESPONSE_FIELDS, `${label}: xhr 响应字段集合不符`);
     for (const legacy of ['raw', 'original', 'request', 'rawResponse', 'retry', 'retryCount']) {
@@ -457,12 +461,62 @@ await check('无重定向请求不会被误判为 redirected', async () => {
     }
 });
 
-await check('ERR_HTTP_STATUS 的 err.response 是 5 字段 BxfResponse，不含原生句柄', async () => {
+await check('重定向：顶层 responseURL / redirected 双引擎一致（无需 raw）', async () => {
+    const cfg = { url: '/redirect' };
+    const f = await api({ ...cfg, engine: 'fetch' });
+    const x = await api({ ...cfg, engine: 'xhr' });
+    assert.ok(f.responseURL.endsWith('/redirect-target'), `fetch: ${f.responseURL}`);
+    assert.equal(x.responseURL, f.responseURL, '两引擎最终地址应一致');
+    assert.equal(f.redirected, true);
+    assert.equal(x.redirected, true);
+    // 三个 url 语义不同：config.url 仍是用户原始入参，不是最终地址
+    assert.equal(f.config.url, '/redirect');
+    assert.equal(x.config.url, '/redirect');
+    assert.notEqual(f.config.url, f.responseURL);
+});
+
+await check('非重定向：responseURL 是绝对化请求地址，redirected=false', async () => {
+    for (const engine of ['fetch', 'xhr']) {
+        const r = await api({ url: '/json', params: { q: '中文' }, engine });
+        assert.ok(/^http:\/\//.test(r.responseURL), `${engine}: 应为绝对地址 ${r.responseURL}`);
+        assert.ok(r.responseURL.includes('/json?'), `${engine}: 应含拼接后的 query ${r.responseURL}`);
+        assert.equal(r.redirected, false);
+        assert.equal(r.config.url, '/json', 'config.url 保持未拼 params 的原始入参');
+    }
+});
+
+await check('自定义引擎 new Response()：request.url 兜底且 redirected=false', async () => {
+    const r = await api({
+        url: '/json?from=custom',
+        engine: async () => new Response(JSON.stringify({ custom: true }), {
+            status: 200, headers: { 'content-type': 'application/json' },
+        }),
+    });
+    assert.deepEqual(r.data, { custom: true });
+    assert.ok(r.responseURL.endsWith('/json?from=custom'), `兜底 URL 错误: ${r.responseURL}`);
+    assert.ok(/^http:\/\//.test(r.responseURL), '兜底值应是绝对化的 request.url');
+    assert.equal(r.redirected, false, '没有真实响应 URL 时不猜重定向');
+    assert.equal(r.config.url, '/json?from=custom');
+});
+
+await check('raw / stream 模式同样带 responseURL / redirected', async () => {
+    const raw = await api({ url: '/json', responseType: 'raw' });
+    assert.ok(raw.responseURL.endsWith('/json'));
+    assert.equal(raw.redirected, false);
+    await raw.data.body.cancel();
+    const s = await api({ url: '/stream', responseType: 'stream', engine: 'fetch' });
+    assert.ok(s.responseURL.endsWith('/stream'));
+    assert.equal(s.redirected, false);
+});
+
+await check('ERR_HTTP_STATUS 的 err.response 是 7 字段 BxfResponse，不含原生句柄', async () => {
     for (const engine of ['fetch', 'xhr']) {
         const e = await api({ url: '/status429', engine, resolveStatus: 200 }).catch(err => err);
         assert.equal(e.code, 'ERR_HTTP_STATUS');
         assert.deepEqual(Object.keys(e.response),
-            ['data', 'status', 'statusText', 'headers', 'config']);
+            ['data', 'status', 'statusText', 'headers', 'config', 'responseURL', 'redirected']);
+        assert.ok(e.response.responseURL.endsWith('/status429'));
+        assert.equal(e.response.redirected, false);
         assert.ok(!('Response' in e.response));
         assert.ok(!('raw' in e.response));
         assert.ok(!('retry' in e) && !('retryCount' in e));

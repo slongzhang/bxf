@@ -28,7 +28,7 @@ export function isBxfResponse(value) {
 }
 
 /**
- * BxfResponse 固定 5 字段。对外既不暴露原生 Response 句柄，也不输出 raw 中间产物：
+ * BxfResponse 固定 7 字段。对外既不暴露原生 Response 句柄，也不输出 raw 中间产物：
  *   - 普通模式下解析层已消费 body，句柄是空壳（clone() 会抛错），没有使用价值；
  *   - 确实需要原生句柄时用 responseType:'raw'，此时 data 就是未消费的原生 Response，
  *     它的 body 流从 data.body 取；
@@ -36,8 +36,37 @@ export function isBxfResponse(value) {
  *     Response，早期「按引擎给不同原生句柄」的 raw 失去了存在理由，且与 data
  *     大量重复（text/blob/arraybuffer 下两者本就是同一个值）。
  * 小写 response 只出现在 BxfError 上，表示「被 resolveStatus 拒绝的整包 BxfResponse」。
+ * responseURL / redirected 的取值规则见 resolveUrlMeta()。
  */
-function makeResponse(response, spec, data) {
+
+/**
+ * 顶层「最终请求地址」与重定向标记。
+ *
+ * response.url：fetch 原生 Response 给的是跟随重定向后的绝对地址；XHR 适配器用
+ *   createResponse({ url: xhr.responseURL }) + setResponseUrl() 补齐，语义一致。
+ * requestUrl：createRequest() 产出的 WHATWG Request.url —— 已绝对化、含 params、
+ *   去 fragment。以下场景 response.url 为空，用它兜底：
+ *     1. 自定义函数引擎返回手工 new Response()（url 恒为 ''）；
+ *     2. redirect:'manual' 的 opaqueredirect、mode:'no-cors' 的 opaque response；
+ *     3. 任何拿不到响应 URL 的环境。
+ *   兜底值是「实际发出的请求地址」，不是「跟随重定向后的终点」，此时也不可能
+ *   知道是否发生过重定向。
+ * redirected 只在 response.url 非空时可信：原生 getter 与 setResponseUrl 的
+ *   defineProperty 都已算好；没有真实响应 URL 时明确给 false，不靠字符串比较猜。
+ */
+function resolveUrlMeta(response, spec, requestUrl) {
+    const finalUrl = typeof response.url === 'string' ? response.url : '';
+    if (finalUrl) {
+        return { responseURL: finalUrl, redirected: Boolean(response.redirected) };
+    }
+    const fallback = requestUrl || spec.url || '';
+    return {
+        responseURL: typeof fallback === 'string' ? fallback : '',
+        redirected: false,
+    };
+}
+
+function makeResponse(response, spec, data, meta) {
     return {
         // 业务数据（两引擎语义完全一致）
         data,
@@ -45,7 +74,10 @@ function makeResponse(response, spec, data) {
         statusText: response.statusText || '',
         headers: headersToObject(response.headers),
         // 与 axios 对齐：成功响应拿到的 config 就是可直接回喂 bxf() 的配置
+        // 注意 config.url 是用户原始入参（未拼 params）；responseURL 是最终地址
         config: spec.source || spec,
+        responseURL: meta.responseURL,
+        redirected: meta.redirected,
     };
 }
 
@@ -59,7 +91,7 @@ function makeResponse(response, spec, data) {
  *   无回调 -> 只累积帧文本，res.data 为帧数组
  * 未以空行结束的尾帧残留也交给调用方，库不替用户决定丢弃。
  */
-async function parseStream(response, spec) {
+async function parseStream(response, spec, meta) {
     const stream = response.body;
     if (!stream || typeof stream.getReader !== 'function') {
         // 不传第 4 参：能力错误没有「已完成解析的 BxfResponse 包装」，
@@ -165,7 +197,7 @@ async function parseStream(response, spec) {
         try { reader.releaseLock(); } catch (e) { /* ignore */ }
     }
 
-    return makeResponse(response, spec, frames);
+    return makeResponse(response, spec, frames, meta);
 }
 
 /**
@@ -187,8 +219,12 @@ function parseJsonOrText(text) {
  * 把 WHATWG Response 解析为唯一形态的 BxfResponse。
  * @param {Response} response 引擎产出的标准响应对象
  * @param {object} spec 最终 RequestSpec
+ * @param {string} [requestUrl] createRequest() 的绝对化 Request.url，用于 response.url 为空时兜底
  */
-export async function normalizeResponse(response, spec) {
+export async function normalizeResponse(response, spec, requestUrl) {
+    const meta = resolveUrlMeta(response, spec, requestUrl);
+    // 同一个响应只算一次 URL 元数据，所有解析分支复用
+    const pack = (data) => makeResponse(response, spec, data, meta);
     const contentType = response.headers.get('content-type') || '';
     // 用户显式指定的 charset 优先：1688 等页面响应头可能错写 charset=utf-8、字节却是 GBK，
     // 此时必须能靠 config.charset 覆盖，否则 text / auto 都救不了乱码。
@@ -198,12 +234,12 @@ export async function normalizeResponse(response, spec) {
     // raw：不消费响应体。data 就是原生 WHATWG Response（唯一原生句柄入口），
     //   它的 body 流从 data.body 取，调用方可自行 clone / getReader / 做流中转。
     if (type === 'raw') {
-        return makeResponse(response, spec, response);
+        return pack(response);
     }
 
     // stream：边读边回调
     if (type === 'stream') {
-        return await parseStream(response, spec);
+        return await parseStream(response, spec, meta);
     }
 
     // 二进制类型完全不需要文本。早期实现无条件 `decodeBytes()` 生成整份
@@ -214,9 +250,9 @@ export async function normalizeResponse(response, spec) {
         // 不需要 toArrayBuffer() 再 slice() 一次（那会额外复制整包字节）。
         const buffer = await response.arrayBuffer();
         if (type === 'arraybuffer') {
-            return makeResponse(response, spec, buffer);
+            return pack(buffer);
         }
-        return makeResponse(response, spec, toBlob(new Uint8Array(buffer), contentType));
+        return pack(toBlob(new Uint8Array(buffer), contentType));
     }
 
     const bytes = new Uint8Array(await response.arrayBuffer());
@@ -224,10 +260,10 @@ export async function normalizeResponse(response, spec) {
 
     switch (type) {
         case 'text':
-            return makeResponse(response, spec, text);
+            return pack(text);
 
         case 'json':
-            return makeResponse(response, spec, parseJsonOrText(text));
+            return pack(parseJsonOrText(text));
 
         case 'document': {
             if (typeof DOMParser === 'undefined') {
@@ -236,11 +272,11 @@ export async function normalizeResponse(response, spec) {
                     'document-unsupported',
                     '当前环境没有 DOMParser，responseType="document" 已降级为字符串。',
                 );
-                return makeResponse(response, spec, text);
+                return pack(text);
             }
             const mime = /xml/i.test(contentType) ? 'application/xml' : 'text/html';
             try {
-                return makeResponse(response, spec, new DOMParser().parseFromString(text, mime));
+                return pack(new DOMParser().parseFromString(text, mime));
             } catch (error) {
                 // 同上：解析失败不挂原生 Response，保持 err.response 形状唯一
                 throw BxfError.from(error, BxfError.ERR_BAD_RESPONSE, spec.source || spec);
@@ -249,7 +285,7 @@ export async function normalizeResponse(response, spec) {
 
         case 'auto':
         default:
-            return makeResponse(response, spec, parseJsonOrText(text));
+            return pack(parseJsonOrText(text));
     }
 }
 

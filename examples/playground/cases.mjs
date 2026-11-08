@@ -37,7 +37,7 @@ export const CASES = [
     { group: 'start', title: '最小请求', desc: '默认 GET + auto 解析，拿到完整 BxfResponse', code:
 `show(await api.get(apiUrl('json')));` },
 
-    { group: 'start', title: '完整响应的所有属性', desc: '固定 5 字段：data / status / statusText / headers / config', code:
+    { group: 'start', title: '完整响应的所有属性', desc: '固定 7 字段：data / status / statusText / headers / config / responseURL / redirected', code:
 `show(await api.get(apiUrl('json')), '完整响应');` },
 
     { group: 'start', title: '只要业务数据 onlyData', desc: '返回 res.data，不再是完整响应对象', code:
@@ -255,8 +255,9 @@ await grab(api.post(apiUrl('echo'), new ReadableStream({ start: function (c) { c
   var r = await api.get(apiUrl('json'), { responseType: 'raw' });
   console.log('data instanceof Response →', r.data instanceof Response);
   console.log('data.bodyUsed =', r.data.bodyUsed, '| data.body 是流 →', typeof r.data.body.getReader === 'function');
-  console.log('对外字段 =', Object.keys(r), '（固定 5 字段，无 raw / Response）');
-  console.log('data.url =', r.data.url, '| redirected =', r.data.redirected);
+  console.log('对外字段 =', Object.keys(r), '（固定 7 字段，无 raw / Response）');
+  console.log('data.url =', r.data.url, '| data.redirected =', r.data.redirected);
+  console.log('顶层 responseURL =', r.responseURL, '| redirected =', r.redirected);
   await r.data.body.cancel();
   show(r, 'raw');
 })();` },
@@ -270,6 +271,16 @@ await grab(api.post(apiUrl('echo'), new ReadableStream({ start: function (c) { c
   console.log('xhr   →', x.data.url, '| redirected =', x.data.redirected);
   console.log('一致 →', f.data.url === x.data.url && f.data.redirected === x.data.redirected);
   await Promise.all([f.data.body.cancel(), x.data.body.cancel()]);
+})();` },
+
+    { group: 'response', title: '重定向：顶层 responseURL / redirected（不必切 raw）', desc: 'config.url 是用户原始入参，responseURL 才是最终实际请求地址', code:
+`await (async () => {
+  var u = apiUrl('redirect', 'n=2');
+  var r = await api.get(u);
+  console.log('config.url（原始入参）=', r.config.url);
+  console.log('responseURL（最终地址）=', r.responseURL);
+  console.log('redirected =', r.redirected);
+  show(r, '重定向');
 })();` },
 
     { group: 'response', title: 'onlyData + resolveStatus 正交', desc: '两者互不影响', code:
@@ -308,7 +319,7 @@ await grab(api.post(apiUrl('echo'), new ReadableStream({ start: function (c) { c
   console.log('是否暴露原生句柄 →', 'Response' in e.response);
 })();` },
 
-    { group: 'status', title: '对外不暴露原生 Response 句柄', desc: 'BxfResponse 固定 5 字段；需要原生句柄请用 raw', code:
+    { group: 'status', title: '对外不暴露原生 Response 句柄', desc: 'BxfResponse 固定 7 字段；需要原生句柄请用 raw', code:
 `await (async () => {
   var r = await api.get(apiUrl('json'));
   console.log('Object.keys(res) =', Object.keys(r));
@@ -320,7 +331,7 @@ await grab(api.post(apiUrl('echo'), new ReadableStream({ start: function (c) { c
   await Promise.all([raw.data.body.cancel(), c.body.cancel()]);
 })();` },
 
-    { group: 'status', title: '失败时 err.response 与成功 res 完全同形', desc: '都是 5 字段 BxfResponse，无大小写嵌套', code:
+    { group: 'status', title: '失败时 err.response 与成功 res 完全同形', desc: '都是 7 字段 BxfResponse，无大小写嵌套', code:
 `await grab(api.get(apiUrl('status', 'code=500'), { resolveStatus: [[200, 300]] }), '500 被拒');` },
 
     /* ==================== ⑦ 引擎与能力矩阵 ==================== */
@@ -597,7 +608,7 @@ await grab(api.post(apiUrl('echo'), new ReadableStream({ start: function (c) { c
   console.log('是否含 signal →', 'signal' in r.config, '| 是否含 cleanup →', 'cleanup' in r.config);
 })();` },
 
-    { group: 'replay', title: '元数据不可枚举，不污染 Object.keys', desc: 'engine 隐藏；JSON 里只含固定 5 字段', code:
+    { group: 'replay', title: '元数据不可枚举，不污染 Object.keys', desc: 'engine 隐藏；JSON 里只含固定 7 字段', code:
 `await (async () => {
   var r = await api.get(apiUrl('json'));
   console.log('Object.keys(res) =', Object.keys(r));

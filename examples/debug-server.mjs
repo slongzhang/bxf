@@ -19,6 +19,7 @@
  *   echo=0          关闭请求回显（只返回 body/ok）
  *   stream=1        消息流：配合 n=<条数> ms=<间隔毫秒> 逐帧输出 SSE
  *   charset=gbk & wrongct=1   响应头错标 utf-8、字节却是 GBK（测 charset 覆盖）
+ *   redirect=<n>    先经 n 次 302 再响应（默认 0），用于测 responseURL / redirected
  *
  * 端口被占用时明确退出，方便探测冲突。
  */
@@ -146,6 +147,16 @@ const server = http.createServer((req, res) => {
                 });
             }
             try {
+                // 302 重定向链：n 次后仍落到 /mock 正常响应。fetch 与 XHR 都会
+                // 跟随，用来实测 res.responseURL / res.redirected 与 config.url 的区别。
+                const redirects = Math.min(Math.max(Number(q.get('redirect')) || 0, 0), 10);
+                if (redirects > 0) {
+                    const next = new URL(req.url, `http://${HOST}:${PORT}`);
+                    if (redirects === 1) next.searchParams.delete('redirect');
+                    else next.searchParams.set('redirect', String(redirects - 1));
+                    res.writeHead(302, { location: next.pathname + next.search });
+                    return res.end();
+                }
                 const buf = Buffer.concat(chunks, received);
                 const status = Number(q.get('status')) || 200;
                 const delay = Math.min(Number(q.get('delay')) || 0, 60000);
@@ -264,6 +275,6 @@ server.on('error', (err) => {
 
 server.listen(PORT, HOST, () => {
     console.log(`bxf 通用调试 Mock 服务已启动：http://${HOST}:${PORT}/`);
-    console.log(`通用接口：/mock  ?status= &rt=json|text|urlencode|sse &delay= &body= &stream=1&n=&ms= &charset=gbk&wrongct=1`);
+    console.log(`通用接口：/mock  ?status= &rt=json|text|urlencode|sse &delay= &body= &stream=1&n=&ms= &charset=gbk&wrongct=1 &redirect=`);
     console.log(`（按 Ctrl+C 停止）`);
 });

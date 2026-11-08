@@ -752,7 +752,7 @@ header('Content-Type: text/html; charset=utf-8');
 
         if (action === 'compare') {
             group('▶ 成功 / 状态拒绝 / 网络失败 三项对照', '#7c3aed', async function () {
-                console.group('① 成功：BxfResponse 固定 5 字段，不暴露原生句柄');
+                console.group('① 成功：BxfResponse 固定 7 字段（含 responseURL / redirected），不暴露原生句柄');
                 await dumpResponse(await api.get(apiUrl('json')));
                 console.groupEnd();
 
@@ -836,9 +836,10 @@ header('Content-Type: text/html; charset=utf-8');
         'apiUrl("json")         // 拼出端点地址',
         'inspect(obj)           // 连不可枚举属性一起列出',
         '',
-        '// ① 成功：固定 5 字段，不暴露原生 Response / raw',
+        '// ① 成功：固定 7 字段（含 responseURL / redirected），不暴露原生 Response / raw',
         'const r = await api.get(apiUrl("json"));',
-        'Object.keys(r)                   // data,status,statusText,headers,config',
+        'Object.keys(r)                   // data,status,statusText,headers,config,responseURL,redirected',
+        'r.responseURL                    // 最终实际请求地址；r.redirected 标记是否重定向',
         '"Response" in r                  // false',
         '"raw" in r                       // false',
         '',

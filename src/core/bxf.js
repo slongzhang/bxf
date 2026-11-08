@@ -132,7 +132,7 @@ export function bxf(urlOrConfig, config, _method, data, _undefined) {
             // 自定义引擎只要返回标准 Response，就走同一套解析
             if (result && !isBxfResponse(result) &&
                 typeof Response !== 'undefined' && result instanceof Response) {
-                return attachEngine(await normalizeResponse(result, engineSpec));
+                return attachEngine(await normalizeResponse(result, engineSpec, request.url));
             }
             return attachEngine(result);
         } catch (error) {

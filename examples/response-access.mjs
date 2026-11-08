@@ -5,16 +5,20 @@
  *   node --experimental-default-type=module examples/response-access.mjs
  *
  * 契约只有两条：
- *   1. BxfResponse 固定 5 字段 {data, status, statusText, headers, config}，
- *      成功侧 res 与失败侧 err.response 完全同形；不暴露原生 Response 句柄，
- *      也不再输出解析前的 raw 中间产物。唯一不可枚举元数据是 engine。
+ *   1. BxfResponse 固定 7 字段 {data, status, statusText, headers, config,
+ *      responseURL, redirected}，成功侧 res 与失败侧 err.response 完全同形；
+ *      不暴露原生 Response 句柄，也不再输出解析前的 raw 中间产物。
+ *      唯一不可枚举元数据是 engine。
+ *      responseURL 是跟随重定向后的最终地址；response.url 为空时（自定义引擎
+ *      手工 new Response()、opaque response）回退到绝对化的 request.url，
+ *      redirected 明确为 false。config.url 则是用户原始入参，三者不可混用。
  *   2. 确实需要原生 WHATWG Response 时指定 responseType:'raw'，
  *      此时 data 就是未消费的原生句柄，body 流从 data.body 取。
  *      XHR 适配器已按 @mswjs/interceptors 方案补齐 url / redirected。
  *
  * 五个场景：
- *   1. 成功请求                -> 5 字段，无 raw / Response 字段
- *   2. 状态码被 resolveStatus 拒绝 -> err.response 是同形的 5 字段 BxfResponse
+ *   1. 成功请求                -> 7 字段，无 raw / Response 字段
+ *   2. 状态码被 resolveStatus 拒绝 -> err.response 是同形的 7 字段 BxfResponse
  *   3. 网络层失败              -> err.response 不存在（根本没拿到 HTTP 响应）
  *   4. raw 模式                -> data 是原生 Response；重定向 url / clone / 流中转
  *   5. 统一取值写法            -> 有无响应都能安全读
@@ -51,10 +55,12 @@ const baseURL = `http://127.0.0.1:${server.address().port}`;
 const bxf = createClient({ baseURL });
 
 const line = (t) => console.log(`\n${'─'.repeat(8)} ${t} ${'─'.repeat(8)}`);
-const FIELDS = ['data', 'status', 'statusText', 'headers', 'config'];
+const FIELDS = [
+    'data', 'status', 'statusText', 'headers', 'config', 'responseURL', 'redirected',
+];
 
 /* ================= 场景 1：成功 ================= */
-line('场景 1｜请求成功 → BxfResponse 固定 5 字段');
+line('场景 1｜请求成功 → BxfResponse 固定 7 字段');
 {
     const res = await bxf.get('/user');
 
@@ -65,7 +71,9 @@ line('场景 1｜请求成功 → BxfResponse 固定 5 字段');
     console.log('res.data          =', res.data);   // 已解析的业务数据
     console.log('res.status        =', res.status);
     console.log('res.engine        =', res.engine, '（不可枚举元数据）');
-    console.log('res.config.url    =', res.config.url);
+    console.log('res.config.url    =', res.config.url, '（原始入参）');
+    console.log('res.responseURL   =', res.responseURL, '（最终实际请求地址）');
+    console.log('res.redirected    =', res.redirected);
 }
 
 /* ================= 场景 2：被状态码规则拒绝 ================= */
@@ -81,6 +89,7 @@ line('场景 2｜429 被 resolveStatus 拒绝 → err.response');
     console.log('与成功响应同形 =', JSON.stringify(Object.keys(err.response)) === JSON.stringify(FIELDS));
     console.log('err.response.data   =', err.response.data);      // 业务体仍可读
     console.log('err.response.status =', err.response.status);
+    console.log('err.response.responseURL =', err.response.responseURL, '| redirected =', err.response.redirected);
     console.log('是否暴露原生句柄   =', 'Response' in err.response);
     console.log('err.config === err.response.config =', err.config === err.response.config);
     console.log('err.retry / err.retryCount =', err.retry, err.retryCount, '（均已移除）');
@@ -107,6 +116,8 @@ line('场景 4｜responseType:"raw" → data 是唯一的原生句柄入口');
     console.log('data.body 是 ReadableStream   =', typeof res.data.body.getReader === 'function');
     console.log('res.data.url                 =', res.data.url);        // 重定向后的最终地址
     console.log('res.data.redirected          =', res.data.redirected); // true
+    console.log('顶层 res.responseURL         =', res.responseURL);      // 与 data.url 一致
+    console.log('顶层 res.redirected          =', res.redirected);       // 无需 raw 即可读
 
     // clone 之后 url 仍然保留（对齐 msw FetchResponse.clone 的转发逻辑）
     const clone = res.data.clone();

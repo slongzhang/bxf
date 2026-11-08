@@ -209,6 +209,20 @@ setTimeout(() => {
 }, 200);
   </script>
 
+  <script type="text/plain" data-title="重定向：查看最终实际请求地址" data-tag="进阶"
+    data-note="/mock?redirect=2 会经过 2 次 302。res.responseURL 是最终地址、res.redirected 标记是否重定向，res.config.url 仍是用户原始入参。">
+var res = null, err = null;
+bxf({ url: API + '/mock?redirect=2&rt=json', method: 'GET' })
+  .then(r => {
+    res = r;
+    console.log('✅ 原始入参 config.url =', r.config.url);
+    console.log('最终地址 responseURL =', r.responseURL);
+    console.log('是否重定向 redirected =', r.redirected);
+  })
+  .catch(e => { err = e; console.warn('❌', e); });
+// 控制台输入 res / err 查看完整响应
+  </script>
+
 </div>
 
 <footer>

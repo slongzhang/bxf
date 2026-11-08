@@ -137,7 +137,9 @@ await check('raw 模式拿到未消费的原生 Response', async () => {
     assert.equal(res.data.bodyUsed, false, 'body 不应已被读取');
     assert.ok(!('Response' in res), '对外不应再暴露 Response 字段');
     assert.ok(!('raw' in res), '响应字段 raw 应已移除');
-    assert.deepEqual(Object.keys(res), ['data', 'status', 'statusText', 'headers', 'config']);
+    assert.deepEqual(Object.keys(res), [
+        'data', 'status', 'statusText', 'headers', 'config', 'responseURL', 'redirected',
+    ]);
 });
 
 await check('raw 模式的 data.body 暴露可读流', async () => {

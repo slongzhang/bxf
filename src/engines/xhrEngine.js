@@ -140,7 +140,7 @@ export const xhrEngine = function (spec, request) {
                     url: xhr.responseURL || request.url,
                     requestUrl: request.url,
                 });
-                normalizeResponse(response, spec).then(
+                normalizeResponse(response, spec, request.url).then(
                     result => finish(resolve, result),
                     error => finish(reject, error),
                 );

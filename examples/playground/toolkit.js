@@ -129,6 +129,8 @@
             if (x.response) {
                 console.log('  .data      =', x.response.data);
                 console.log('  .status    =', x.response.status);
+                console.log('  .responseURL =', x.response.responseURL,
+                    '| .redirected =', x.response.redirected);
                 console.log('  字段       =', Object.keys(x.response).join(', '));
                 console.log('  原生句柄   = 不对外暴露；需要时用 responseType: "raw"');
             } else {
@@ -141,9 +143,11 @@
             console.log('statusText   =', x.statusText);
             console.log('headers      =', x.headers);
             console.log('config(可回喂)=', x.config);
+            console.log('responseURL  =', x.responseURL, '（最终实际请求地址）');
+            console.log('redirected   =', x.redirected);
             console.log('原生句柄     =', (typeof Response !== 'undefined' && x.data instanceof Response)
                 ? '已在 res.data（raw 模式）' : '不暴露；需要时指定 responseType: "raw"');
-            console.log('字段         =', Object.keys(x).join(', '), '（固定 5 字段）');
+            console.log('字段         =', Object.keys(x).join(', '), '（固定 7 字段）');
             console.log('meta         = { engine:', x.engine, '}（不可枚举）');
             console.log('完整响应对象（可展开）：', x);
         } else {

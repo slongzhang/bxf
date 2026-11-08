@@ -23,7 +23,7 @@ export const fetchEngine = async function (spec, request) {
         } else {
             response = await rawFetch.call(globalThis, request);
         }
-        return await normalizeResponse(response, spec);
+        return await normalizeResponse(response, spec, request.url);
     } finally {
         // timeout 覆盖到「引擎交出响应」为止：raw 拿到响应头就交出，长流不受影响
         if (isFunction(spec.cleanup)) spec.cleanup();

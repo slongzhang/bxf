@@ -17,8 +17,8 @@ RequestSpec → WHATWG Request → [fetch | XHR 适配器] → WHATWG Response �
 - **双引擎对等**：XHR 统一用 `responseType='arraybuffer'` 读字节，再构造成标准 `Response`（含 204/205/304 无响应体处理）。
 - **能力矩阵**：无法对等的能力不做模拟。`stream` 只有 fetch 支持，进度回调只有 XHR 支持；显式指定引擎却不匹配所需能力时直接抛 `ERR_UNSUPPORTED`，不偷偷换引擎。未指定引擎时自动挑选，两者都支持则 **fetch 优先**。
 - **可重放配置**：成功与失败都能拿到 `config`（扁平纯数据、url 未拼接、data 未编码、不含 signal/cleanup），可直接回喂 `bxf(config)` 再发一次。库**不会**自动重放，重放时机由你的业务代码决定（例如 token 过期刷新后重试）。
-- **干净响应契约**：BxfResponse 固定 5 字段 `{data, status, statusText, headers, config}`，不向外透出原生 `Response` 句柄、也不输出 `raw` 中间产物；需要原生能力时指定 `responseType:'raw'`，此时 `data` 就是未消费的 `Response`。小写 `response` 只出现在 `BxfError` 上，表示被拒的整包响应。
-- **重定向信息对齐 msw**：XHR 适配器把 `xhr.responseURL` 透传进 WHATWG `Response`，`raw` 模式下 `data.url` / `data.redirected` 与 fetch 引擎完全一致（含 `clone()` 转发）。
+- **干净响应契约**：BxfResponse 固定 7 字段 `{data, status, statusText, headers, config, responseURL, redirected}`，不向外透出原生 `Response` 句柄、也不输出 `raw` 中间产物；需要原生能力时指定 `responseType:'raw'`，此时 `data` 就是未消费的 `Response`。小写 `response` 只出现在 `BxfError` 上，表示被拒的整包响应。
+- **最终地址可见**：`responseURL` 是跟随重定向后的实际请求地址，`redirected` 标记是否发生过重定向，普通模式即可读取，不必切 `raw`；XHR 适配器把 `xhr.responseURL` 透传进 WHATWG `Response`（对齐 msw），双引擎语义一致（含 `clone()` 转发）。
 - **MV3 友好**：`nativeEngine` 通过 `about:blank` iframe 取未被网页 hook 的原生 `fetch`/`XMLHttpRequest`；Service Worker 里无 `FileReader`/`DOMParser` 时走 `TextDecoder` 与明确降级。
 - **零依赖**，UMD / IIFE 双产物。
 
@@ -29,6 +29,7 @@ RequestSpec → WHATWG Request → [fetch | XHR 适配器] → WHATWG Response �
 ```bash
 pnpm install
 pnpm run build       # 产出 dist/bxf.umd.js / bxf.iife.js / *.min.js
+pnpm test            # 151 项：一致性 62 + 流中转/重放 30 + 边界回归 23 + 并发/暴力 22 + 大 body 14
 ```
 
 > **要跑本文档里的案例，构建是必需步骤。** 实验室页面加载 `dist/bxf.umd.js`，  
@@ -77,6 +78,7 @@ MAX_BODY_MB=128 node examples/debug-server.mjs   # 请求体上限，默认 64MB
 | `echo=0`                         | 关闭**默认 json 回显**（返回 `{ ok: true }`）；仅作用于 `rt=json`，`text` / `urlencode` 有自己的载荷规则 |
 | `stream=1` + `n=<条>` + `ms=<间隔>` | 消息流：逐帧 SSE 输出，`n` 上限 50，末帧固定为 `data: [DONE]` |
 | `charset=gbk` + `wrongct=1`      | 响应头错标 utf-8、字节却是 GBK，测 `charset` 覆盖    |
+| `redirect=<n>`                   | 先经 n 次 302 再响应（上限 10），测 `res.responseURL` / `res.redirected` |
 
 不论什么 method，服务端都会**回显请求**（method / query / headers / body / 解析出的  
 `fields` 与 `files`），所以普通请求、表单、文件上传都能直接看到「服务端实际收到了什么」。  
@@ -164,7 +166,7 @@ bxf({ url: API + '/mock?rt=json', method: 'POST', data: fd })
 页面里的「案例库」卡片还含 DELETE 带体、FormData 文本字段、拦截器、取消请求、  
 `run(cfg)` 包装等完整示例，每条都有「复制」按钮。
 
-> 与下面「控制台实验室」的区别：实验室是覆盖**全 API 的 146 条案例 + 跨源 CORS 端点**；  
+> 与下面「控制台实验室」的区别：实验室是覆盖**全 API 的 147 条案例 + 跨源 CORS 端点**；  
 > 本调试台聚焦**单一通用 `/mock` + 文件上传 / 流 / 任意响应**，并内置 `genFile` 造数。
 
 ---
@@ -184,6 +186,19 @@ bxf({ url: API + '/mock?rt=json', method: 'POST', data: fd })
 | GET 20MB `blob` | ~158ms | ~26MB | **0 次文本解码** |
 | GET 20MB 单帧 SSE | ~224ms | ~40MB | 增量分帧，线性复杂度 |
 | XHR 引擎 10MB 上传 | ~93ms | ~40MB | 比 fetch 多一次整包物化 |
+
+### 本轮修掉的内存 / 性能问题（优化前 → 优化后，均为实测）
+
+| 位置 | 问题 | 优化前 | 优化后 |
+| --- | --- | --- | --- |
+| `normalizeResponse` | `blob` / `arraybuffer` 也无条件 `decodeBytes()` 生成整包 UTF-16 字符串；`arraybuffer` 还再 `slice()` 复制一次 | heap +40MB，307ms / 305ms | heap +0.3MB / +0.1MB，148ms / 158ms |
+| `normalizeResponse` | `isJson(text) ? JSON.parse(text) : text` 把大 JSON **解析两遍** | 20MB 解析 2 次，heap +60MB（auto） | 解析 1 次，heap +40MB |
+| `parseStream` | 每块对「整份累积缓冲」做 `replace()` / `split()`，单帧大消息是 **O(n²)** | 20MB 单帧 4632ms、heap +158MB、RSS +126MB | 224ms、heap +43MB、RSS +40MB |
+| `normalizeRequest` | MB 级多键嵌套 `data` 被 `deepMerge` 深拷贝两次 | 单次 ~27ms | 单次 ~20ms（少一次整树拷贝） |
+| `debug-server` `/mock` | 每个 chunk 都 `Buffer.concat(chunks)` 求长度（O(n²)）+ 10MB 硬上限 `req.destroy()` | 9MB 291ms、**10MB 直接 ECONNRESET** | O(1) 计数 + 64MB 上限 + 413；9MB 47ms、10MB 50ms、30MB 三文件 119ms |
+
+> 分帧算法重写后与重写前做过 **193 组（多载荷 × 多种切块）等价性对照，0 差异**，  
+> 并已固化为 `large-body.test.mjs` 里的 69 组 fuzz 回归。
 
 ### 使用建议
 
@@ -247,7 +262,7 @@ node examples/playground/server.mjs
 | `apiUrl`           | `apiUrl(name, extra?) → string`                                    | 拼同源端点 `origin + pathname + '?api=' + name`；`extra` 支持字符串 `'code=429'` 或对象 `{ code: 429 }`（自动 encode）                                                      | `apiUrl('status', 'code=502')`                                             |
 | `crossUrl`         | `crossUrl(name, extra?) → string`                                  | 同上但指向跨源站 `PORT+1`，用于 CORS 案例                                                                                                                              | `crossUrl('json')`                                                         |
 | `instance`         | `instance(defaults?) → 实例`                                         | `bxf.create(defaults)` 便捷封装，测 `baseURL` / `timeout` 等 defaults                                                                                            | `instance({ baseURL: '/' }).get('?api=json')`                              |
-| `show`             | `show(x, label?) → x`                                              | **万能打印器**：自动识别 `BxfResponse` / `BxfError` / 普通值，逐字段打印 `data / statusText / headers / config(可回喂) / 字段 / meta`；失败时额外打印 `code / status / err.response`；返回原值 | `show(await api.get(apiUrl('json')), '完整响应')`                              |
+| `show`             | `show(x, label?) → x`                                              | **万能打印器**：自动识别 `BxfResponse` / `BxfError` / 普通值，逐字段打印 `data / statusText / headers / config(可回喂) / responseURL / redirected / 字段 / meta`；失败时额外打印 `code / status / err.response`；返回原值 | `show(await api.get(apiUrl('json')), '完整响应')`                              |
 | `grab`             | `grab(promise, label?) → Promise<any>`                             | 成功失败**都** `show` 且**不抛错**；`await grab(...)` 保证页内「运行」等到输出                                                                                                  | `await grab(api.get(apiUrl('status','code=429'), { resolveStatus: 200 }))` |
 | `inspect` / `dump` | `inspect(x, label?) → x`                                           | 列出**全部自有属性**（含不可枚举的 `engine`），并展开完整对象                                                                                                                     | `inspect(await api.get(apiUrl('json')))`                                   |
 | `meta`             | `meta(x, label?) → x`                                              | 只看不可枚举元数据 `{ engine, enumerableKeys }`                                                                                                                    | `meta(res)`                                                                |
@@ -266,14 +281,14 @@ node examples/playground/server.mjs
 
 ```js
 show(await api.get(apiUrl('json')));
-// 控制台逐行输出：data / statusText / headers / config(可回喂) / 字段 / meta / 完整对象（可展开）
+// 控制台逐行输出：data / statusText / headers / config(可回喂) / responseURL / redirected / 字段 / meta / 完整对象（可展开）
 ```
 
 失败场景不用写 `try/catch`，交给 `grab()`：
 
 ```js
 await grab(api.get(apiUrl('status', 'code=429'), { resolveStatus: [[200, 300]] }), '429 被拒');
-// 打印 BxfError：message / code / status / config / err.response（整包 5 字段 BxfResponse）
+// 打印 BxfError：message / code / status / config / err.response（整包 7 字段 BxfResponse）
 ```
 
 **方式 B —— `res` / `err` 变量，事后反复查看**
@@ -302,7 +317,7 @@ pnpm run verify                                        # 语法 + 逐条执行�
 node examples/playground/verify-cases.mjs --syntax    # 只做语法校验，不需要服务
 ```
 
-
+`verify` 会加载 `dist/bxf.umd.js` + 工具库，用真实 `fetch` 把 147 条案例跑一遍。Node 没有 `XMLHttpRequest` / `DOMParser` / 浏览器 `location`，因此 XHR 引擎与进度回调相关的案例会被标注为「环境差异」而非错误——它们在浏览器里才会真正生效。当前结果：语法 **147/147**、运行 **138/147**，9 条为上述环境差异。
 
 ### 测试端点
 
@@ -444,17 +459,43 @@ bxf.post(url, data, config);               // 带 data 方法
   statusText,   // 状态描述
   headers,      // 普通对象，重复头合并为 "a, b"
   config,       // 可直接回喂 bxf() 的请求配置；成功 / 失败 / 双引擎同一份形状
+  responseURL,  // 跟随重定向后的最终实际请求地址（绝对 URL）
+  redirected,   // 是否发生过重定向（boolean）
 }
 ```
 
-成功侧 `res` 与失败侧 `err.response` **完全同形**（都是上面 5 个字段），不需要再区分大小写或多层嵌套。
+成功侧 `res` 与失败侧 `err.response` **完全同形**（都是上面 7 个字段），不需要再区分大小写或多层嵌套。
+
+### 最终请求地址：`responseURL` / `redirected`
+
+普通模式（无需 `responseType:'raw'`）即可读到重定向后的实际地址：
+
+```js
+const res = await bxf.get('/download', { params: { v: 2 } });
+
+res.responseURL;   // 跟随重定向后的最终绝对地址
+res.redirected;    // 是否发生过重定向
+res.config.url;    // 用户原始入参（未拼 params、未补 baseURL）
+```
+
+三个 `url` 语义不同，不要混用（尤其**回喂请用 `res.config`，不要 `bxf(res)` 或 `{...res.config, ...res}`**，否则会把终点地址当成起点、短路重定向链）：
+
+| 值 | 含义 | 典型值 |
+| --- | --- | --- |
+| `res.config.url` | 用户传入的原始地址，可直接回喂 `bxf(config)` | `/download` |
+| `spec.url`（内部） | 拼完 `params` 后的请求地址，可能是相对路径 | `/download?v=2` |
+| `res.responseURL` | 引擎拿到的最终响应地址，绝对 URL | `https://cdn.example.com/file.zip` |
+
+实现上：fetch 引擎读原生 `Response.url`；XHR 引擎由适配器把 `xhr.responseURL` 透传进 WHATWG `Response`（对齐 msw）。当 `response.url` 为空时（自定义函数引擎返回手工 `new Response()`、`redirect:'manual'` 的 opaqueredirect、`mode:'no-cors'` 的 opaque response），用 `createRequest()` 产出的绝对化 `Request.url` 兜底 —— 此时 `responseURL` 表示「实际发出的请求地址」而非重定向终点，`redirected` 明确为 `false`，不做猜测。
+
+以下路径拿不到这两个字段，属预期：`onlyData:true`（只返回 `data`）、网络层 / 超时 / 取消失败（`err.response === undefined`）、响应拦截器返回全新自定义对象（只补不可枚举的 `engine`）。
 
 两点收敛：
 
 - **不暴露原生 `Response` 句柄**：普通模式下解析层已消费 body，句柄是空壳（`clone()` 会抛错）；确实需要原生能力时用 `responseType:'raw'`。
 - **不再输出 `raw` 字段**：引擎边界已按 msw 方案统一成 WHATWG `Response`，早期「按引擎给不同原生句柄」的 raw 失去了存在理由，且 `text`/`blob`/`arraybuffer` 下它与 `data` 本就是同一个值。`stream` 的原始帧由 `onStream(frame)` 逐帧给出（帧级、按空行分帧，不解析 `data:` 字段、不 `JSON.parse`），`raw` 模式的 body 流从 `data.body` 取。
 
-唯一不可枚举元数据是 `engine`（实际生效引擎），不出现在 `Object.keys(res)` / `JSON.stringify` 里。 重放完全由调用方 `bxf(config)` 发起。
+唯一不可枚举元数据是 `engine`（实际生效引擎），不出现在 `Object.keys(res)` / `JSON.stringify` 里。`retry()` / `retryCount` 已移除 —— 重放完全由调用方 `bxf(config)` 发起。
 
 | `responseType` | `data` | 备注 |
 | --- | --- | --- |
@@ -484,11 +525,13 @@ res.data.clone();                  // 可用，且 clone 后 url 仍然保留
 await res.data.text();             // 或 .arrayBuffer() / .body.getReader()
 ```
 
-XHR 引擎的 `Response` 由适配器构造，参考 `@mswjs/interceptors` 的 `FetchResponse.setUrl()` 方案补齐 `url` / `redirected`（读取 `xhr.responseURL`），所以两个引擎在 raw 模式下拿到的元信息一致。
+XHR 引擎的 `Response` 由适配器构造，已按 `@mswjs/interceptors` 的 `FetchResponse.setUrl()` 方案补齐 `url` / `redirected`（读取 `xhr.responseURL`），所以两个引擎在 raw 模式下拿到的元信息一致。
+
+> 只想看最终地址不必切 `raw`：顶层 `res.responseURL` / `res.redirected` 与这里的 `res.data.url` / `res.data.redirected` 同源同值，`raw` 的价值在于拿到未消费的 body 流与 `clone()`。
 
 ### `err.response`（失败时的整包响应）
 
-小写 `response` **只出现在 `BxfError` 上**，且永远是 5 字段的 BxfResponse，与成功的 `res` 同形。
+小写 `response` **只出现在 `BxfError` 上**，且永远是 7 字段的 BxfResponse，与成功的 `res` 同形。
 
 | 场景 | `err.response` |
 | --- | --- |
@@ -598,7 +641,7 @@ await fetch('https://cdn.example.com/upload', {
 > 案例由 `examples/playground/cases.mjs` 生成，共分为 14 组。
 
 <!-- CASES:START -->
-共 **146** 条案例，分 **14** 组。所有代码都只依赖实验室挂载的全局工具，可反复粘贴执行。
+共 **147** 条案例，分 **14** 组。所有代码都只依赖实验室挂载的全局工具，可反复粘贴执行。
 
 | 组 | 条数 | 覆盖 |
 | --- | --- | --- |
@@ -606,7 +649,7 @@ await fetch('https://cdn.example.com/upload', {
 | ② 调用形态与实例 | 13 | 4 种入参、方法快捷方式、create/all/spread |
 | ③ URL / params / data | 16 | 参数序列化（对象 / 字符串 / URLSearchParams / 表单数组）、请求体编码、baseURL、绝对地址 |
 | ④ 请求头与凭据 | 12 | headers（对象 / Headers / 键值对数组）、auth、xsrf、cookie、重复响应头、CORS |
-| ⑤ 响应契约与 responseType | 17 | 全 8 种响应类型、charset、空体/204/304 |
+| ⑤ 响应契约与 responseType | 18 | 全 8 种响应类型、charset、空体/204/304 |
 | ⑥ resolveStatus 与错误响应 | 10 | 数字/数组/区间/函数规则、err.response 家族 |
 | ⑦ 引擎与能力矩阵 | 14 | 显式引擎、自动选引擎、能力冲突、自定义引擎 |
 | ⑧ 上传 / 下载进度 | 5 | XHR 专属能力，未指定引擎时自动切换 |
@@ -632,7 +675,7 @@ show(await api.get(apiUrl('json')));
 
 #### 2. 完整响应的所有属性
 
-固定 5 字段：data / status / statusText / headers / config
+固定 7 字段：data / status / statusText / headers / config / responseURL / redirected
 
 ```js
 show(await api.get(apiUrl('json')), '完整响应');
@@ -1187,8 +1230,9 @@ await (async () => {
   var r = await api.get(apiUrl('json'), { responseType: 'raw' });
   console.log('data instanceof Response →', r.data instanceof Response);
   console.log('data.bodyUsed =', r.data.bodyUsed, '| data.body 是流 →', typeof r.data.body.getReader === 'function');
-  console.log('对外字段 =', Object.keys(r), '（固定 5 字段，无 raw / Response）');
-  console.log('data.url =', r.data.url, '| redirected =', r.data.redirected);
+  console.log('对外字段 =', Object.keys(r), '（固定 7 字段，无 raw / Response）');
+  console.log('data.url =', r.data.url, '| data.redirected =', r.data.redirected);
+  console.log('顶层 responseURL =', r.responseURL, '| redirected =', r.redirected);
   await r.data.body.cancel();
   show(r, 'raw');
 })();
@@ -1210,7 +1254,22 @@ await (async () => {
 })();
 ```
 
-#### 67. onlyData + resolveStatus 正交
+#### 67. 重定向：顶层 responseURL / redirected（不必切 raw）
+
+config.url 是用户原始入参，responseURL 才是最终实际请求地址
+
+```js
+await (async () => {
+  var u = apiUrl('redirect', 'n=2');
+  var r = await api.get(u);
+  console.log('config.url（原始入参）=', r.config.url);
+  console.log('responseURL（最终地址）=', r.responseURL);
+  console.log('redirected =', r.redirected);
+  show(r, '重定向');
+})();
+```
+
+#### 68. onlyData + resolveStatus 正交
 
 两者互不影响
 
@@ -1224,7 +1283,7 @@ show(await api.get(apiUrl('status', 'code=429'), { onlyData: true, resolveStatus
 ### ⑥ resolveStatus 与错误响应
 > 数字/数组/区间/函数规则、err.response 家族
 
-#### 68. 规则：数字精确匹配
+#### 69. 规则：数字精确匹配
 
 命中才 resolve
 
@@ -1232,7 +1291,7 @@ show(await api.get(apiUrl('status', 'code=429'), { onlyData: true, resolveStatus
 await grab(api.get(apiUrl('status', 'code=429'), { resolveStatus: 200 }), '数字规则');
 ```
 
-#### 69. 规则：数组=若干单一码
+#### 70. 规则：数组=若干单一码
 
 [200, 429] 表示「200 或 429」，不是区间
 
@@ -1240,7 +1299,7 @@ await grab(api.get(apiUrl('status', 'code=429'), { resolveStatus: 200 }), '数�
 show(await api.get(apiUrl('status', 'code=429'), { resolveStatus: [200, 429] }), '单码数组');
 ```
 
-#### 70. 规则：区间 [[200, 300]] 左闭右开
+#### 71. 规则：区间 [[200, 300]] 左闭右开
 
 299 命中，300 不命中
 
@@ -1249,7 +1308,7 @@ console.log('299 →', (await grab(api.get(apiUrl('status', 'code=299'), { resol
   '| 300 →', (await grab(api.get(apiUrl('status', 'code=300'), { resolveStatus: [[200, 300]] }))).code);
 ```
 
-#### 71. 规则：混合数字 / 区间 / 函数
+#### 72. 规则：混合数字 / 区间 / 函数
 
 数组内任一项命中即可；区间项是一层数组 [min,max]
 
@@ -1257,7 +1316,7 @@ console.log('299 →', (await grab(api.get(apiUrl('status', 'code=299'), { resol
 show(await api.get(apiUrl('status', 'code=418'), { resolveStatus: [200, [400, 500], function (s) { return s === 599; }] }), '混合规则');
 ```
 
-#### 72. 规则：函数 (status, response) => boolean
+#### 73. 规则：函数 (status, response) => boolean
 
 第二个参数是完整 BxfResponse
 
@@ -1265,7 +1324,7 @@ show(await api.get(apiUrl('status', 'code=418'), { resolveStatus: [200, [400, 50
 show(await api.get(apiUrl('status', 'code=429'), { resolveStatus: function (s, r) { console.log('函数收到', s, r.status, r.data.message); return s === 429; } }), '函数规则');
 ```
 
-#### 73. 非法规则 → ERR_BAD_OPTION_VALUE
+#### 74. 非法规则 → ERR_BAD_OPTION_VALUE
 
 字符串 / 对象 / null 之外的类型不允许
 
@@ -1273,7 +1332,7 @@ show(await api.get(apiUrl('status', 'code=429'), { resolveStatus: function (s, r
 await grab(api.get(apiUrl('json'), { resolveStatus: '200' }), '非法规则');
 ```
 
-#### 74. null / 不传 = 只要有响应就 resolve
+#### 75. null / 不传 = 只要有响应就 resolve
 
 包括 429 / 502
 
@@ -1281,7 +1340,7 @@ await grab(api.get(apiUrl('json'), { resolveStatus: '200' }), '非法规则');
 show(await api.get(apiUrl('status', 'code=502'), { resolveStatus: null }), 'null 规则');
 ```
 
-#### 75. err.response（小写）是整包 BxfResponse
+#### 76. err.response（小写）是整包 BxfResponse
 
 业务体不丢；err.status 是顶层副本
 
@@ -1296,9 +1355,9 @@ await (async () => {
 })();
 ```
 
-#### 76. 对外不暴露原生 Response 句柄
+#### 77. 对外不暴露原生 Response 句柄
 
-BxfResponse 固定 5 字段；需要原生句柄请用 raw
+BxfResponse 固定 7 字段；需要原生句柄请用 raw
 
 ```js
 await (async () => {
@@ -1313,9 +1372,9 @@ await (async () => {
 })();
 ```
 
-#### 77. 失败时 err.response 与成功 res 完全同形
+#### 78. 失败时 err.response 与成功 res 完全同形
 
-都是 5 字段 BxfResponse，无大小写嵌套
+都是 7 字段 BxfResponse，无大小写嵌套
 
 ```js
 await grab(api.get(apiUrl('status', 'code=500'), { resolveStatus: [[200, 300]] }), '500 被拒');
@@ -1327,7 +1386,7 @@ await grab(api.get(apiUrl('status', 'code=500'), { resolveStatus: [[200, 300]] }
 ### ⑦ 引擎与能力矩阵
 > 显式引擎、自动选引擎、能力冲突、自定义引擎
 
-#### 78. 显式 engine: "fetch"
+#### 79. 显式 engine: "fetch"
 
 meta.engine 看实际生效引擎
 
@@ -1335,7 +1394,7 @@ meta.engine 看实际生效引擎
 meta(show(await api.get(apiUrl('json'), { engine: 'fetch' }), 'fetch'));
 ```
 
-#### 79. 显式 engine: "xhr"
+#### 80. 显式 engine: "xhr"
 
 XHR 结果被构造成等价的 WHATWG Response
 
@@ -1343,7 +1402,7 @@ XHR 结果被构造成等价的 WHATWG Response
 meta(show(await api.get(apiUrl('json'), { engine: 'xhr' }), 'xhr'));
 ```
 
-#### 80. 未指定引擎 → fetch 优先
+#### 81. 未指定引擎 → fetch 优先
 
 两者都支持时默认 fetch
 
@@ -1351,7 +1410,7 @@ meta(show(await api.get(apiUrl('json'), { engine: 'xhr' }), 'xhr'));
 meta(await api.get(apiUrl('json')));
 ```
 
-#### 81. 双引擎同参数对照
+#### 82. 双引擎同参数对照
 
 字段集合、status、data 类型应完全一致
 
@@ -1359,7 +1418,7 @@ meta(await api.get(apiUrl('json')));
 await cmp({ url: apiUrl('json') }, 'json');
 ```
 
-#### 82. 双引擎对照：中文 / 重复头 / 二进制
+#### 83. 双引擎对照：中文 / 重复头 / 二进制
 
 一次看三类容易不一致的场景
 
@@ -1367,7 +1426,7 @@ await cmp({ url: apiUrl('json') }, 'json');
 await cmp({ url: apiUrl('multiheader'), responseType: 'arraybuffer' }, 'binary+headers');
 ```
 
-#### 83. responseType:"stream" 自动切到 fetch
+#### 84. responseType:"stream" 自动切到 fetch
 
 未指定引擎时按能力挑选
 
@@ -1375,7 +1434,7 @@ await cmp({ url: apiUrl('multiheader'), responseType: 'arraybuffer' }, 'binary+h
 meta(await api.get(apiUrl('sse', 'n=2&ms=60'), { responseType: 'stream' }));
 ```
 
-#### 84. 进度回调自动切到 XHR
+#### 85. 进度回调自动切到 XHR
 
 只要传了 onUpload/OnDownloadProgress
 
@@ -1383,7 +1442,7 @@ meta(await api.get(apiUrl('sse', 'n=2&ms=60'), { responseType: 'stream' }));
 meta(await api.get(apiUrl('large', 'kb=16&chunks=2&ms=10'), { onDownloadProgress: function () {} }));
 ```
 
-#### 85. 能力互斥且未指定引擎 → ERR_UNSUPPORTED
+#### 86. 能力互斥且未指定引擎 → ERR_UNSUPPORTED
 
 stream 只有 fetch、进度只有 XHR，无法自动选
 
@@ -1391,7 +1450,7 @@ stream 只有 fetch、进度只有 XHR，无法自动选
 await grab(api.get(apiUrl('sse', 'n=2&ms=20'), { responseType: 'stream', onDownloadProgress: function () {} }), '能力冲突');
 ```
 
-#### 86. 显式 fetch + 进度 → ERR_UNSUPPORTED
+#### 87. 显式 fetch + 进度 → ERR_UNSUPPORTED
 
 不偷偷换引擎
 
@@ -1399,7 +1458,7 @@ await grab(api.get(apiUrl('sse', 'n=2&ms=20'), { responseType: 'stream', onDownl
 await grab(api.get(apiUrl('large', 'kb=16&chunks=2&ms=10'), { engine: 'fetch', onDownloadProgress: function () {} }), 'fetch 不支持进度');
 ```
 
-#### 87. 显式 XHR + stream → ERR_UNSUPPORTED
+#### 88. 显式 XHR + stream → ERR_UNSUPPORTED
 
 同上
 
@@ -1407,7 +1466,7 @@ await grab(api.get(apiUrl('large', 'kb=16&chunks=2&ms=10'), { engine: 'fetch', o
 await grab(api.get(apiUrl('sse', 'n=2&ms=20'), { engine: 'xhr', responseType: 'stream' }), 'XHR 不支持 stream');
 ```
 
-#### 88. engine 传全局 fetch 函数
+#### 89. engine 传全局 fetch 函数
 
 按函数名识别为 fetch 引擎
 
@@ -1415,7 +1474,7 @@ await grab(api.get(apiUrl('sse', 'n=2&ms=20'), { engine: 'xhr', responseType: 's
 show(await api.get(apiUrl('json'), { engine: window.fetch }), '传全局 fetch');
 ```
 
-#### 89. nativeEngine: true 取 iframe 原生 API
+#### 90. nativeEngine: true 取 iframe 原生 API
 
 MV3 核心能力：绕过网页对 fetch 的 hook
 
@@ -1423,7 +1482,7 @@ MV3 核心能力：绕过网页对 fetch 的 hook
 await grab(api.get(apiUrl('json'), { nativeEngine: true }), 'iframe 原生 fetch');
 ```
 
-#### 90. 自定义函数引擎（返回标准 Response）
+#### 91. 自定义函数引擎（返回标准 Response）
 
 自定义引擎仍走同一套统一解析层
 
@@ -1434,7 +1493,7 @@ await grab(api({ url: apiUrl('json'), engine: async function (spec, request) {
 } }), '自定义引擎');
 ```
 
-#### 91. XHR 不支持的一等公民能力会 warn
+#### 92. XHR 不支持的一等公民能力会 warn
 
 mode/cache/referrer 等被忽略而不是静默，看控制台警告
 
@@ -1448,7 +1507,7 @@ show(await api.get(apiUrl('json'), { engine: 'xhr', mode: 'cors', cache: 'no-sto
 ### ⑧ 上传 / 下载进度
 > XHR 专属能力，未指定引擎时自动切换
 
-#### 92. onDownloadProgress
+#### 93. onDownloadProgress
 
 自动切到 XHR，事件对象原生 ProgressEvent
 
@@ -1458,7 +1517,7 @@ show(await api.get(apiUrl('large', 'kb=64&chunks=8&ms=40'), {
 }), '下载进度');
 ```
 
-#### 93. onUploadProgress
+#### 94. onUploadProgress
 
 POST 一个较大的 body 才看得到分片
 
@@ -1468,7 +1527,7 @@ show(await api.post(apiUrl('upload'), 'x'.repeat(128 * 1024), {
 }), '上传进度');
 ```
 
-#### 94. 两个进度回调同时用
+#### 95. 两个进度回调同时用
 
 都属于 XHR 专属能力
 
@@ -1479,7 +1538,7 @@ meta(await api.post(apiUrl('upload'), 'y'.repeat(64 * 1024), {
 }));
 ```
 
-#### 95. 进度能力 + 显式 engine: "xhr"
+#### 96. 进度能力 + 显式 engine: "xhr"
 
 显式指定且能力匹配时正常执行
 
@@ -1487,7 +1546,7 @@ meta(await api.post(apiUrl('upload'), 'y'.repeat(64 * 1024), {
 show(await api.get(apiUrl('large', 'kb=16&chunks=2&ms=10'), { engine: 'xhr', onDownloadProgress: function (e) { console.log('progress', e.loaded); } }), '显式 XHR 进度');
 ```
 
-#### 96. 进度回调与 resolveStatus 组合
+#### 97. 进度回调与 resolveStatus 组合
 
 进度不影响状态码判定
 
@@ -1501,7 +1560,7 @@ await grab(api.get(apiUrl('status', 'code=429'), { resolveStatus: 200, onDownloa
 ### ⑨ 流式与流中转
 > SSE / onStream / raw 流中转 / 边下边传
 
-#### 97. responseType: "stream" 按帧读取
+#### 98. responseType: "stream" 按帧读取
 
 无 onStream 时 data 是完整帧原文数组（含注释帧 / 尾帧）
 
@@ -1509,7 +1568,7 @@ await grab(api.get(apiUrl('status', 'code=429'), { resolveStatus: 200, onDownloa
 show(await api.get(apiUrl('sse', 'n=3&ms=80'), { responseType: 'stream' }), 'SSE 帧');
 ```
 
-#### 98. onStream 一帧一回调 + 二选一
+#### 99. onStream 一帧一回调 + 二选一
 
 有回调时只回调不累积，res.data 恒为 []
 
@@ -1525,7 +1584,7 @@ await (async () => {
 })();
 ```
 
-#### 99. stream 必须走 fetch（自动选择）
+#### 100. stream 必须走 fetch（自动选择）
 
 meta.engine 应为 fetch
 
@@ -1533,7 +1592,7 @@ meta.engine 应为 fetch
 meta(await api.get(apiUrl('sse', 'n=2&ms=40'), { responseType: 'stream' }));
 ```
 
-#### 100. raw 模式自己读 reader
+#### 101. raw 模式自己读 reader
 
 不消费响应体，完全由调用方掌控
 
@@ -1546,7 +1605,7 @@ await (async () => {
 })();
 ```
 
-#### 101. 代理下载：边下边传
+#### 102. 代理下载：边下边传
 
 把响应流直接接到上传请求体，不落盘不缓冲
 
@@ -1558,7 +1617,7 @@ await (async () => {
 })();
 ```
 
-#### 102. raw + timeout：长流不被掐断
+#### 103. raw + timeout：长流不被掐断
 
 timeout 只覆盖到「引擎交出响应」为止
 
@@ -1570,7 +1629,7 @@ await (async () => {
 })();
 ```
 
-#### 103. stream + timeout 会覆盖整个读取过程
+#### 104. stream + timeout 会覆盖整个读取过程
 
 需要读完流才交出响应，因此可能 ETIMEDOUT
 
@@ -1584,7 +1643,7 @@ await grab(api.get(apiUrl('sse', 'n=8&ms=120'), { responseType: 'stream', timeou
 ### ⑩ 超时与取消
 > timeout、signal、AbortController、长流不被掐断
 
-#### 104. timeout 命中 → ETIMEDOUT
+#### 105. timeout 命中 → ETIMEDOUT
 
 服务端延迟 600ms，客户端只给 120ms
 
@@ -1592,7 +1651,7 @@ await grab(api.get(apiUrl('sse', 'n=8&ms=120'), { responseType: 'stream', timeou
 await grab(api.get(apiUrl('delay', 'ms=600'), { timeout: 120 }), '超时');
 ```
 
-#### 105. timeout 未命中正常返回
+#### 106. timeout 未命中正常返回
 
 可清除的 setTimeout，不会留下悬挂定时器
 
@@ -1600,7 +1659,7 @@ await grab(api.get(apiUrl('delay', 'ms=600'), { timeout: 120 }), '超时');
 show(await api.get(apiUrl('delay', 'ms=80'), { timeout: 2000 }), '未超时');
 ```
 
-#### 106. signal + AbortController → ERR_CANCELED
+#### 107. signal + AbortController → ERR_CANCELED
 
 主动取消
 
@@ -1613,7 +1672,7 @@ await (async () => {
 })();
 ```
 
-#### 107. 延迟取消（已经发出去的请求）
+#### 108. 延迟取消（已经发出去的请求）
 
 sleep 后再 abort
 
@@ -1626,7 +1685,7 @@ await (async () => {
 })();
 ```
 
-#### 108. AbortSignal.timeout 作为外部 signal
+#### 109. AbortSignal.timeout 作为外部 signal
 
 reason.name=TimeoutError → 映射 ETIMEDOUT
 
@@ -1634,7 +1693,7 @@ reason.name=TimeoutError → 映射 ETIMEDOUT
 await grab(api.get(apiUrl('delay', 'ms=600'), { signal: AbortSignal.timeout(120) }), '外部超时信号');
 ```
 
-#### 109. timeout 与 signal 合并取最先触发者
+#### 110. timeout 与 signal 合并取最先触发者
 
 anySignal 透传触发源的 reason
 
@@ -1653,7 +1712,7 @@ await (async () => {
 ### ⑪ 拦截器与前置钩子
 > request/response 顺序、rejected、eject/clear、beforeInterceptors
 
-#### 110. request 拦截器加请求头
+#### 111. request 拦截器加请求头
 
 收到的是 RequestSpec，改 spec.headers 生效
 
@@ -1665,7 +1724,7 @@ await (async () => {
 })();
 ```
 
-#### 111. request 拦截器「后添加先执行」
+#### 112. request 拦截器「后添加先执行」
 
 栈顺序，打印执行次序
 
@@ -1679,7 +1738,7 @@ await (async () => {
 })();
 ```
 
-#### 112. response 拦截器改写 data
+#### 113. response 拦截器改写 data
 
 resolveStatus / onlyData 在其之后仍生效
 
@@ -1691,7 +1750,7 @@ await (async () => {
 })();
 ```
 
-#### 113. response 拦截器「先添加先执行」
+#### 114. response 拦截器「先添加先执行」
 
 队列顺序
 
@@ -1705,7 +1764,7 @@ await (async () => {
 })();
 ```
 
-#### 114. rejected 处理器捕获错误
+#### 115. rejected 处理器捕获错误
 
 x.interceptors.response.use(null, fn)
 
@@ -1717,7 +1776,7 @@ await (async () => {
 })();
 ```
 
-#### 115. eject / clear 移除拦截器
+#### 116. eject / clear 移除拦截器
 
 use 返回索引 id
 
@@ -1732,7 +1791,7 @@ await (async () => {
 })();
 ```
 
-#### 116. beforeInterceptors 返回 false 终止
+#### 117. beforeInterceptors 返回 false 终止
 
 BEFORE_TERMINATE，请求不会发出
 
@@ -1743,7 +1802,7 @@ await grab(api({ url: apiUrl('json'), beforeInterceptors: function (spec) {
 } }), 'BEFORE_TERMINATE');
 ```
 
-#### 117. beforeInterceptors 返回 Promise
+#### 118. beforeInterceptors 返回 Promise
 
 支持异步前置（例如先取 token）
 
@@ -1754,7 +1813,7 @@ show(await api({ url: apiUrl('echo'), beforeInterceptors: async function (spec) 
 } }), '异步前置');
 ```
 
-#### 118. 响应拦截器替换对象后仍补挂元数据
+#### 119. 响应拦截器替换对象后仍补挂元数据
 
 展开对象仍保留 engine 元数据
 
@@ -1772,7 +1831,7 @@ await (async () => {
 ### ⑫ 配置快照与重放
 > res.config / err.config 回喂、外部重放、可序列化
 
-#### 119. 成功响应 res.config 可直接回喂
+#### 120. 成功响应 res.config 可直接回喂
 
 扁平纯数据，url 未拼接、data 未编码
 
@@ -1784,7 +1843,7 @@ await (async () => {
 })();
 ```
 
-#### 120. 失败响应 err.config 同样可回喂
+#### 121. 失败响应 err.config 同样可回喂
 
 token 过期重试的前提
 
@@ -1796,7 +1855,7 @@ await (async () => {
 })();
 ```
 
-#### 121. 模拟 token 过期重试（完整流程）
+#### 122. 模拟 token 过期重试（完整流程）
 
 库不自动重放，由你的代码决定何时再发
 
@@ -1812,7 +1871,7 @@ await (async () => {
 })();
 ```
 
-#### 122. 同一份 config 换参数再发一次
+#### 123. 同一份 config 换参数再发一次
 
 重放完全由调用方发起，库不提供 retry() 糖
 
@@ -1825,19 +1884,22 @@ await (async () => {
 })();
 ```
 
-#### 123. 唯一不可枚举元数据是 engine
+#### 124. 响应不再挂 raw / retry / retryCount
+
+唯一不可枚举元数据是 engine
 
 ```js
 await (async () => {
   var r = await api.get(apiUrl('json'));
   console.log('Object.keys(res) =', Object.keys(r));
+  console.log('raw / retry / retryCount 存在 →', 'raw' in r, typeof r.retry, r.retryCount);
   console.log('engine =', r.engine, '| 可枚举 =', Object.keys(r).includes('engine'));
   var e = await api.get(apiUrl('status', 'code=429'), { resolveStatus: 200 }).catch(function (x) { return x; });
-  console.log('err.engine =', e.engine);
+  console.log('err.engine =', e.engine, '| err.retry =', e.retry);
 })();
 ```
 
-#### 124. 失败后用 err.config 手动重放
+#### 125. 失败后用 err.config 手动重放
 
 何时重试、重试几次全由业务代码决定
 
@@ -1850,7 +1912,7 @@ await (async () => {
 })();
 ```
 
-#### 125. config 可 JSON.stringify / postMessage
+#### 126. config 可 JSON.stringify / postMessage
 
 不含 signal / cleanup / 函数等运行态
 
@@ -1862,9 +1924,9 @@ await (async () => {
 })();
 ```
 
-#### 126. 元数据不可枚举，不污染 Object.keys
+#### 127. 元数据不可枚举，不污染 Object.keys
 
-engine 隐藏；JSON 里只含固定 5 字段
+engine 隐藏；JSON 里只含固定 7 字段
 
 ```js
 await (async () => {
@@ -1880,7 +1942,7 @@ await (async () => {
 ### ⑬ 一等公民与逃生舱
 > fetchOptions/xhrOptions/rawFields、mode/redirect/cache 等
 
-#### 127. fetchOptions 透传非保护字段
+#### 128. fetchOptions 透传非保护字段
 
 如 priority；核心字段 method/headers/body 不可覆盖
 
@@ -1888,7 +1950,7 @@ await (async () => {
 show(await api.get(apiUrl('json'), { fetchOptions: { priority: 'high', method: 'DELETE' } }), 'fetchOptions');
 ```
 
-#### 128. xhrOptions 透传自定义属性
+#### 129. xhrOptions 透传自定义属性
 
 保护键（timeout/withCredentials/...）会被跳过
 
@@ -1896,7 +1958,7 @@ show(await api.get(apiUrl('json'), { fetchOptions: { priority: 'high', method: '
 show(await api.get(apiUrl('json'), { engine: 'xhr', xhrOptions: { labFlag: 'hello', responseType: 'text' } }), 'xhrOptions');
 ```
 
-#### 129. rawFields 按最终引擎分流
+#### 130. rawFields 按最终引擎分流
 
 fetch 分流到 fetchOptions，XHR 分流到 xhrOptions
 
@@ -1904,7 +1966,7 @@ fetch 分流到 fetchOptions，XHR 分流到 xhrOptions
 await cmp({ url: apiUrl('json'), rawFields: { labRaw: 1 } }, 'rawFields');
 ```
 
-#### 130. mode: "cors" / "no-cors" 对照
+#### 131. mode: "cors" / "no-cors" 对照
 
 no-cors 会得到 opaque 响应（status 0）
 
@@ -1913,7 +1975,7 @@ console.log('cors →', (await api.get(apiUrl('json'), { mode: 'cors' })).status
   '| no-cors →', (await api.get(apiUrl('json'), { mode: 'no-cors' })).status);
 ```
 
-#### 131. redirect: "follow" 默认跟随
+#### 132. redirect: "follow" 默认跟随
 
 302 链走到最终 JSON
 
@@ -1921,7 +1983,7 @@ console.log('cors →', (await api.get(apiUrl('json'), { mode: 'cors' })).status
 show(await api.get(apiUrl('redirect', 'n=2')), 'follow');
 ```
 
-#### 132. redirect: "manual" 拿到 opaqueredirect
+#### 133. redirect: "manual" 拿到 opaqueredirect
 
 浏览器返回 status 0 的 opaque 响应
 
@@ -1929,7 +1991,7 @@ show(await api.get(apiUrl('redirect', 'n=2')), 'follow');
 await grab(api.get(apiUrl('redirect', 'n=1'), { redirect: 'manual' }), 'manual redirect');
 ```
 
-#### 133. cache / referrerPolicy / keepalive
+#### 134. cache / referrerPolicy / keepalive
 
 一等公民能力，直接透传到 RequestInit
 
@@ -1937,7 +1999,7 @@ await grab(api.get(apiUrl('redirect', 'n=1'), { redirect: 'manual' }), 'manual r
 show(await api.get(apiUrl('json'), { cache: 'no-store', referrerPolicy: 'no-referrer', keepalive: true }), '一等公民');
 ```
 
-#### 134. integrity 不匹配会导致请求失败
+#### 135. integrity 不匹配会导致请求失败
 
 SRI 校验由浏览器执行
 
@@ -1945,7 +2007,7 @@ SRI 校验由浏览器执行
 await grab(api.get(apiUrl('json'), { integrity: 'sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' }), 'SRI 不匹配');
 ```
 
-#### 135. credentials: "omit" / "same-origin" / "include"
+#### 136. credentials: "omit" / "same-origin" / "include"
 
 三种取值都能跑通
 
@@ -1957,7 +2019,7 @@ await (async () => {
 })();
 ```
 
-#### 136. responseType + charset + resolveStatus 组合
+#### 137. responseType + charset + resolveStatus 组合
 
 多参数叠加互不干扰
 
@@ -1971,7 +2033,7 @@ show(await api.get(apiUrl('gbk'), { responseType: 'text', charset: 'gbk', resolv
 ### ⑭ 错误码全景
 > 各 code 的可复现触发方式与速查表
 
-#### 137. 错误码速查表
+#### 138. 错误码速查表
 
 全部 BxfError.code
 
@@ -1979,7 +2041,7 @@ show(await api.get(apiUrl('gbk'), { responseType: 'text', charset: 'gbk', resolv
 console.table(BXF_CODES);
 ```
 
-#### 138. ERR_NETWORK：断网 / 端口不通 / 跨域被拦
+#### 139. ERR_NETWORK：断网 / 端口不通 / 跨域被拦
 
 causeName=TypeError
 
@@ -1987,7 +2049,7 @@ causeName=TypeError
 await grab(api.get('http://127.0.0.1:1/nope'), 'ERR_NETWORK');
 ```
 
-#### 139. ETIMEDOUT：超时
+#### 140. ETIMEDOUT：超时
 
 可清除定时器触发
 
@@ -1995,7 +2057,7 @@ await grab(api.get('http://127.0.0.1:1/nope'), 'ERR_NETWORK');
 await grab(api.get(apiUrl('delay', 'ms=500'), { timeout: 100 }), 'ETIMEDOUT');
 ```
 
-#### 140. ERR_CANCELED：主动取消
+#### 141. ERR_CANCELED：主动取消
 
 AbortController.abort()
 
@@ -2003,7 +2065,7 @@ AbortController.abort()
 await (async () => { var c = new AbortController(); var p = api.get(apiUrl('delay', 'ms=500'), { signal: c.signal }); c.abort(); await grab(p, 'ERR_CANCELED'); })();
 ```
 
-#### 141. ERR_HTTP_STATUS：状态码被拒
+#### 142. ERR_HTTP_STATUS：状态码被拒
 
 唯一会带 err.response 的常见错误
 
@@ -2011,7 +2073,7 @@ await (async () => { var c = new AbortController(); var p = api.get(apiUrl('dela
 await grab(api.get(apiUrl('status', 'code=503'), { resolveStatus: [[200, 300]] }), 'ERR_HTTP_STATUS');
 ```
 
-#### 142. ERR_UNSUPPORTED：能力不匹配
+#### 143. ERR_UNSUPPORTED：能力不匹配
 
 显式引擎与所需能力冲突
 
@@ -2019,7 +2081,7 @@ await grab(api.get(apiUrl('status', 'code=503'), { resolveStatus: [[200, 300]] }
 await grab(api.get(apiUrl('sse', 'n=2&ms=20'), { engine: 'xhr', responseType: 'stream' }), 'ERR_UNSUPPORTED');
 ```
 
-#### 143. ERR_BAD_OPTION_VALUE：配置类型非法
+#### 144. ERR_BAD_OPTION_VALUE：配置类型非法
 
 resolveStatus 传字符串
 
@@ -2027,7 +2089,7 @@ resolveStatus 传字符串
 await grab(api.get(apiUrl('json'), { resolveStatus: {} }), 'ERR_BAD_OPTION_VALUE');
 ```
 
-#### 144. BEFORE_TERMINATE：前置钩子终止
+#### 145. BEFORE_TERMINATE：前置钩子终止
 
 beforeInterceptors 返回 false
 
@@ -2035,7 +2097,7 @@ beforeInterceptors 返回 false
 await grab(api({ url: apiUrl('json'), beforeInterceptors: function () { return false; } }), 'BEFORE_TERMINATE');
 ```
 
-#### 145. ERR_INVALID_URL：URL 无法构造 Request
+#### 146. ERR_INVALID_URL：URL 无法构造 Request
 
 catch 后统一包装
 
@@ -2043,7 +2105,7 @@ catch 后统一包装
 await grab(api({ url: 'http://[' }), 'ERR_INVALID_URL');
 ```
 
-#### 146. 统一取值写法（有无响应都能安全读）
+#### 147. 统一取值写法（有无响应都能安全读）
 
 err.response 存在与否先判断；配置数组串行发起，避免未处理的 Promise
 
@@ -2107,13 +2169,20 @@ A：`deepMerge` 递归展开配置时检测到循环会栈溢出，最终以 `Bx
 
 ## 版本与破坏性变更
 
+### 本次增量（1.2.0 之后，尚未发版）
+
+- **新增响应字段 `responseURL` / `redirected`**，BxfResponse 由 5 字段变为 **7 字段** `{data, status, statusText, headers, config, responseURL, redirected}`；做 `Object.keys(res)` 深比较 / 全量序列化的调用方需同步。
+- `responseURL` 取 `Response.url`（XHR 由 `xhr.responseURL` 透传），为空时回退到绝对化的 `Request.url`；`redirected` 只在有真实 `Response.url` 时可信，其余场景明确为 `false`。
+- `res.config.url` 仍是用户原始入参，与 `res.responseURL` 不可混用；回喂请用 `bxf(res.config)`。
+- `examples/debug-server.mjs` 的 `/mock` 新增 `redirect=<n>`，调试台可直接实测重定向链。
+
 当前 `package.json` 版本 `1.2.0`。以下是 `1.2.0` 相对 `1.1.x` 的**破坏性变更**（从旧版升级时请逐条对照）：
 
-- **移除对外的原生句柄字段 `response`**，需要原生 WHATWG `response` 时改用 `responseType:'raw'`（`data` 即未消费句柄）。
+- **移除对外的原生句柄字段 `Response`**，需要原生 WHATWG `Response` 时改用 `responseType:'raw'`（`data` 即未消费句柄）。
 - **移除响应字段 `raw`**，BxfResponse 从 6 字段收敛为 **5 字段** `{data, status, statusText, headers, config}`；`raw` 模式的 body 流改从 `data.body` 取，`stream` 改为帧级：原始帧由 `onStream(frame)` 逐帧给出（无 `onStream` 时 `res.data` 为帧原文数组、有 `onStream` 时 `res.data` 恒为 `[]`），不再解析 `data:` 字段、不再 `JSON.parse`。
 - **移除 `responseType:'blobtext'`**，GBK 等乱码修复统一用 `responseType:'text'` + `charset:'gbk'`（引擎边界统一后 `text` 已能按 charset 正确解码，与 `blobtext` 完全等价）。
 - **`onStream` 回调签名 `(msg, chunk)` → `(frame)` 单参**：旧的 `msg` 解析值已不存在，回调只给原始帧文本；`res.data` 由「消息数组」变为「帧原文数组（无 `onStream`）/ 空数组（有 `onStream`）」，二选一、不重复累积。
-- 重放一律由调用方 `bxf(config)` 发起；唯一保留的不可枚举元数据是 `engine`。
+- **移除 `res.retry()` / `err.retry()` 与 `retryCount` 元数据**，重放一律由调用方 `bxf(config)` 发起；唯一保留的不可枚举元数据是 `engine`。
 - **`charset` 显式指定优先于响应头**（此前被 `content-type` 覆盖，导致响应头错写 utf-8 的 GBK 页面无法修复乱码）；不传时行为不变。
 - XHR 适配器按 `@mswjs/interceptors` 的 `FetchResponse.setUrl()` 方案补齐 `Response.url` / `redirected`（读取 `xhr.responseURL`），raw 模式下双引擎元信息一致。
 - `original` / `request` / `rawResponse` 等冗余字段已移除。
@@ -2132,7 +2201,7 @@ src/
   utils/          queryEncode / 统一层工具
 examples/
   playground/     server.mjs / toolkit.js / cases.mjs / gen-readme.mjs / verify-cases.mjs
-                  ← Node 控制台实验室（146 案例 / 跨源 CORS / 公共函数工具库 / 案例自检）
+                  ← Node 控制台实验室（147 案例 / 跨源 CORS / 公共函数工具库 / 案例自检）
   debug-server.mjs / debug.html   ← 通用 Mock 调试台（/mock 任意 method + 文件上传/流/任意响应 + 案例库）
   response-access.mjs   响应字段对照可运行示例
   bxf-debug.php         旧版单文件 PHP 调试页（备用）
