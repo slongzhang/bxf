@@ -1,4 +1,6 @@
+import pkg from '../package.json';
 import { createClient } from "./core/createClient.js";
 
-
-export default createClient();
+const bxf = createClient();
+bxf.version = pkg.version;
+export default bxf;
